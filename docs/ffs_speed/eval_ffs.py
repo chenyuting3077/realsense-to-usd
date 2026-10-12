@@ -1,7 +1,7 @@
-"""Faster Fast-FoundationStereo settings vs. the one used (848x480, max disparity 192), see README.md:
+"""Faster Fast-FoundationStereo settings vs. the one used before (848x480, max disparity 192), see README.md:
 latency of an 848x480 IR pair; ETH3D two-view accuracy (laser-scan ground truth, non-occluded
 pixels, each pair cut to an 848x480 window, scored at full resolution); on D455 recordings (every
-4th projector-on IR pair, no ground truth) coverage and |depth difference| vs. the setting used,
+4th projector-on IR pair, no ground truth) coverage and |depth difference| vs. that setting,
 by its depth.
 
 Usage: python -m docs.ffs_speed.eval_ffs output/live_a/rec output/live_b/rec
@@ -19,9 +19,9 @@ import torch
 from recon.ffs import FFS, engine_path
 
 ETH3D = os.path.expanduser("~/datasets/eth3d")
-SETTINGS = [("848x480, max_disp 192 (used)", engine_path(), 1.0),
-            ("636x360 (0.75x), max_disp 192", engine_path(384, 640), 0.75),
-            ("848x480, max_disp 128", engine_path(max_disp=128), 1.0)]
+SETTINGS = [("848x480, max_disp 192 (before)", engine_path(480, 864), 1.0),
+            ("636x360 (0.75x), max_disp 192 (used now)", engine_path(), 0.75),
+            ("848x480, max_disp 128", engine_path(480, 864, 128), 1.0)]
 BINS = [0.2, 0.35, 1, 2, 3, 4, 5]
 
 
@@ -89,7 +89,7 @@ def main():
         rows.append(f"| {name} | " + " | ".join(cells) + " |")
         del ffs
         torch.cuda.empty_cache()
-    print(f"\nD455 ({len(recs)} recordings): coverage / median / p90 |depth difference| vs. the setting used, "
+    print(f"\nD455 ({len(recs)} recordings): coverage / median / p90 |depth difference| vs. 848x480, max_disp 192, "
           "by its depth\n\n| | " + " | ".join(f"{lo}–{hi} m" for lo, hi in zip(BINS, BINS[1:])) + " |\n|---|"
           + "---:|" * (len(BINS) - 1) + "\n" + "\n".join(rows[1:]))
 

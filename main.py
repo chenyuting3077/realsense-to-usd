@@ -261,7 +261,7 @@ def main():
     if args.frames and not os.path.isdir(os.path.join(args.frames, "ir1_on")):
         p.error(f"{args.frames} is not a rec/ of a live session (no ir1_on/)")
     ctx = mp.get_context("spawn")
-    ui = {"viewer": None, "ffs": None, "seg": None, "map_q": None, "cam_q": None, "ui_q": None}
+    ui = {"viewer": None, "map_q": None, "cam_q": None, "ui_q": None}
     if args.view:
         ui.update(map_q=ctx.Queue(), cam_q=ctx.Queue(maxsize=2), ui_q=ctx.Queue())
     export = None
@@ -311,15 +311,11 @@ def run_session(args, out, ui):
     tracker = Tracker(source, args.imu, cam_q)
     meta = tracker.meta
     st = meta["stereo"]
-    if ui["ffs"] is None:
-        ui["ffs"] = FFS()
-    if ui["seg"] is None:
-        if os.path.exists(SEG_ENGINE):
-            ui["seg"] = PersonSeg()
-        else:
-            ui["seg"] = False
+    if "ffs" not in ui:  # loaded once for every session
+        ui["ffs"], ui["seg"] = FFS(), PersonSeg() if os.path.exists(SEG_ENGINE) else None
+        if ui["seg"] is None:
             print(f"{SEG_ENGINE} not found (python -m recon.export_seg_trt): people stay in the live map, "
-                  "gs/offline.py masks them", flush=True)
+                  "gs.offline masks them", flush=True)
     ir1_from_color = np.array(st["ir1_from_color"])
     K = intrinsic_matrix(meta)
     sensor = Sensor.from_camera_matrix(torch.tensor(K, dtype=torch.float32), meta["width"], meta["height"])
@@ -330,7 +326,7 @@ def run_session(args, out, ui):
                        DEPTH_MAX, FLOOR_DEPTH_MAX)
     active_table = tracker.T  # the trajectory the active map was built with
     frames_q = queue.Queue()
-    depth = Depth(meta, ui["ffs"], ui["seg"] or None, tracker.req_q, tracker.frames_q, frames_q)
+    depth = Depth(meta, ui["ffs"], ui["seg"], tracker.req_q, tracker.frames_q, frames_q)
     if args.view and viewer is None:
         viewer = ui["viewer"] = mp.get_context("spawn").Process(
             target=view_process, args=(map_q, cam_q, ui_q, st, bool(meta.get("up_ir1"))))

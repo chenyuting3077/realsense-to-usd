@@ -16,24 +16,16 @@ import torch
 from torchvision.models import segmentation as S
 
 from recon.export_seg_trt import HEIGHT, WIDTH, build_engine
-from recon.person_mask import ENGINE, PERSON, normalize
+from recon.person_mask import ENGINE, Person, normalize
 
 R50 = (S.deeplabv3_resnet50, S.DeepLabV3_ResNet50_Weights.DEFAULT)
 MBV3 = (S.deeplabv3_mobilenet_v3_large, S.DeepLabV3_MobileNet_V3_Large_Weights.DEFAULT)
 MBV3_ENGINE = ENGINE.replace("dlv3_r50", "dlv3_mbv3")
 
 
-class Person(torch.nn.Module):
-    def __init__(self, ctor, weights):
-        super().__init__()
-        self.m = ctor(weights=weights, aux_loss=None)
-
-    def forward(self, x):
-        return self.m(x)["out"].argmax(1) == PERSON
-
-
 def pytorch(model, half):
-    m = Person(*model).cuda().eval()
+    ctor, weights = model
+    m = Person(ctor(weights=weights, aux_loss=None)).cuda().eval()
     m = m.half() if half else m
 
     def run(color):
@@ -48,10 +40,10 @@ def tensorrt(engine):
     if not os.path.exists(engine):
         onnx_path = engine.replace("_fp16.engine", ".onnx")
         with torch.no_grad():
-            x = torch.randn(1, 3, HEIGHT, WIDTH, device="cuda").half()
-            torch.onnx.export(Person(*MBV3).cuda().eval().half(), x, onnx_path, opset_version=17, dynamo=False,
-                              input_names=["image"], output_names=["person"])
-        build_engine(onnx_path, engine)
+            m = Person(MBV3[0](weights=MBV3[1], aux_loss=None)).cuda().eval().half()
+            torch.onnx.export(m, torch.randn(1, 3, HEIGHT, WIDTH, device="cuda").half(), onnx_path,
+                              opset_version=17, dynamo=False, input_names=["image"], output_names=["person"])
+        build_engine(onnx_path, engine, tf32=False)
     e = trt.Runtime(trt.Logger(trt.Logger.ERROR)).deserialize_cuda_engine(open(engine, "rb").read())
     ctx = e.create_execution_context()
     out = torch.empty(tuple(e.get_tensor_shape("person")), dtype=torch.bool, device="cuda")

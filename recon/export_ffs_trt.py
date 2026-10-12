@@ -1,8 +1,8 @@
 """Build the Fast-FoundationStereo TensorRT engine of recon/ffs.py (fp32 with TF32, 8 iterations,
-480x864 = 848x480 padded to 32, max disparity 192), through the ONNX-compatible cost volumes of
-FFS's scripts/make_single_onnx.py. Other sizes / max disparities go to recon.ffs.engine_path().
+640x384 = the 0.75x 848x480 IR padded to 32, max disparity 192), through the ONNX-compatible cost
+volumes of FFS's scripts/make_single_onnx.py. Other sizes / max disparities: recon.ffs.engine_path().
 
-Usage: python -m recon.export_ffs_trt [--height 384 --width 640] [--max-disp 128]   (~5 min)
+Usage: python -m recon.export_ffs_trt [--height 480 --width 864] [--max-disp 128]   (~5 min)
 """
 import argparse
 import os
@@ -30,7 +30,8 @@ def export_onnx(path, height, width, max_disp):
                           do_constant_folding=True)
 
 
-def build_engine(onnx_path, engine_path):
+def build_engine(onnx_path, engine_path, tf32=True):
+    """A strongly typed engine (TensorRT 11: the precision is the ONNX's), TF32 for its fp32 layers."""
     import tensorrt as trt
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
@@ -39,7 +40,8 @@ def build_engine(onnx_path, engine_path):
     if not parser.parse_from_file(onnx_path):
         raise SystemExit("\n".join(str(parser.get_error(i)) for i in range(parser.num_errors)))
     config = builder.create_builder_config()
-    config.set_flag(trt.BuilderFlag.TF32)
+    if tf32:
+        config.set_flag(trt.BuilderFlag.TF32)
     plan = builder.build_serialized_network(network, config)
     if plan is None:
         raise SystemExit("engine build failed")
@@ -49,8 +51,8 @@ def build_engine(onnx_path, engine_path):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--height", type=int, default=480)
-    p.add_argument("--width", type=int, default=864)
+    p.add_argument("--height", type=int, default=384)
+    p.add_argument("--width", type=int, default=640)
     p.add_argument("--max-disp", type=int, default=192)
     args = p.parse_args()
     engine = engine_path(args.height, args.width, args.max_disp)

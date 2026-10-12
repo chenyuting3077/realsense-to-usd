@@ -71,7 +71,7 @@ ORB-SLAM3、Fast-FoundationStereo、FastGS 都要照這裡的指令放在 `~/`�
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python -m recon.export_ffs_trt   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine（約 5 分鐘）
+python -m recon.export_ffs_trt   # -> output/ffs/ffs_384x640_it8_fp32_tf32.engine（約 5 分鐘）
 ```
 
 TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。

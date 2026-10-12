@@ -35,9 +35,9 @@ pairs from a D455 recording, compared with the D455's own depth at 0.3–2.5 m (
 - Fewer iterations, max_disp 128 (nearest depth 0.19 m → 0.29 m) and FP8 trade accuracy for speed;
   FP8 loses more on the D455 IR images than on ETH3D.
 
-Here the engine is 480x864 (848x480 padded to a multiple of 32): 141–149 ms a frame in the depth thread, including the
-warp into the color camera, without the person segmentation running (replay of `output/live_20261012_160515/rec`).
-PyTorch vs. TensorRT accuracy was not measured again at this size.
+Here the 848x480 IR (padded to 864) took 141–149 ms a frame in the depth thread, including the warp into the color
+camera, without the person segmentation running (replay of `output/live_20261012_160515/rec`). PyTorch vs. TensorRT
+accuracy was not measured again at this size. main.py now runs FFS on the IR at 0.75x (636x360, 81 ms): [docs/ffs_speed](../ffs_speed/README.md).
 
 ## Person segmentation
 

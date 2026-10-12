@@ -7,6 +7,7 @@ import os
 
 import torch
 
+from recon.export_ffs_trt import build_engine
 from recon.person_mask import ENGINE, load_model
 
 HEIGHT, WIDTH = 480, 848
@@ -18,25 +19,10 @@ def export_onnx(path):
                           opset_version=17, dynamo=False, input_names=["image"], output_names=["person"])
 
 
-def build_engine(onnx_path, engine_path):
-    import tensorrt as trt
-    logger = trt.Logger(trt.Logger.WARNING)
-    builder = trt.Builder(logger)
-    network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED))
-    parser = trt.OnnxParser(network, logger)
-    if not parser.parse_from_file(onnx_path):
-        raise SystemExit("\n".join(str(parser.get_error(i)) for i in range(parser.num_errors)))
-    plan = builder.build_serialized_network(network, builder.create_builder_config())
-    if plan is None:
-        raise SystemExit("engine build failed")
-    with open(engine_path, "wb") as f:
-        f.write(plan)
-
-
 if __name__ == "__main__":
     os.makedirs(os.path.dirname(ENGINE), exist_ok=True)
     onnx_path = ENGINE.replace("_fp16.engine", ".onnx")
     if not os.path.exists(onnx_path):
         export_onnx(onnx_path)
-    build_engine(onnx_path, ENGINE)
+    build_engine(onnx_path, ENGINE, tf32=False)
     print(f"-> {ENGINE}")

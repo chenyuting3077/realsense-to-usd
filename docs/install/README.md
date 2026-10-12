@@ -71,7 +71,7 @@ ORB-SLAM3, Fast-FoundationStereo and FastGS are expected in `~/`, as cloned here
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python -m recon.export_ffs_trt   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine (~5 min)
+python -m recon.export_ffs_trt   # -> output/ffs/ffs_384x640_it8_fp32_tf32.engine (~5 min)
 ```
 
 TensorRT is pip-installed into the env, leaving a system TensorRT alone. An engine is tied to its input size and TensorRT version.

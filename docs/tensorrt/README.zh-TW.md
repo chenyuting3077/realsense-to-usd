@@ -34,8 +34,9 @@ ETH3D two-view：27 組訓練集、non-occluded 像素、雷射掃描 ground tru
 - 在 Thor 上 PyTorch fp16 autocast 比 fp32 慢（290 vs 189 ms）。
 - 減少迭代、max_disp 128（最近可量距離 0.19 m → 0.29 m）、FP8 都是用精度換速度；FP8 在 D455 的 IR 影像上損失比 ETH3D 大。
 
-這個 repo 的引擎是 480x864（848x480 補到 32 的倍數）：在 depth thread 裡每幀 141–149 ms，含轉到 color 相機，
+這個 repo 的 848x480 IR（補到 864）在 depth thread 裡每幀 141–149 ms，含轉到 color 相機，
 沒開人物分割（replay `output/live_20261012_160515/rec`）。這個尺寸沒有重新比較 PyTorch 與 TensorRT 的精度。
+main.py 現在把 IR 縮成 0.75 倍（636x360，81 ms）再跑 FFS：[docs/ffs_speed](../ffs_speed/README.zh-TW.md)。
 
 ## 人物分割
 

@@ -10,16 +10,19 @@ from recon.frames import intrinsic_matrix
 
 FFS_ROOT = os.path.expanduser("~/Fast-FoundationStereo")
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-ENGINE = os.path.join(ROOT, "output/ffs/ffs_480x864_it8_fp32_tf32.engine")  # export_ffs_trt.py: 848x480 padded to 32
-
-
-def engine_path(height=480, width=864, max_disp=192):
-    """export_ffs_trt.py's engine for that padded input size and max disparity (8 iterations, fp32 + TF32)."""
-    md = "" if max_disp == 192 else f"_md{max_disp}"
-    return os.path.join(ROOT, f"output/ffs/ffs_{height}x{width}_it8{md}_fp32_tf32.engine")
 EDGE_THRESH = 0.05  # flying pixels: 3x3 depth spread above this fraction of the depth
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
+
+
+def engine_path(height=384, width=640, max_disp=192):
+    """export_ffs_trt.py's engine for an input padded to height x width (8 iterations, fp32 + TF32)."""
+    md = "" if max_disp == 192 else f"_md{max_disp}"
+    return os.path.join(ROOT, f"output/ffs/ffs_{height}x{width}_it8{md}_fp32_tf32.engine")
+
+
+# 848x480 IR at 0.75x: 636x360 padded to 640x384, 81 instead of 142 ms (docs/ffs_speed)
+ENGINE, SCALE = engine_path(), 0.75
 
 
 def load_model(valid_iters=8, max_disp=192):
@@ -38,9 +41,9 @@ class FFS:
     """ffs(left, right): HxW uint8 CUDA tensors -> HxW float32 disparity of the left image. With
     scale < 1 the pair is downscaled (area) for the engine and the disparity scaled back up."""
 
-    def __init__(self, engine=ENGINE, scale=1.0):
-        self.scale = scale
+    def __init__(self, engine=ENGINE, scale=SCALE):
         import tensorrt as trt
+        self.scale = scale
         if not os.path.exists(engine):
             raise SystemExit(f"{engine} not found: build it with python -m recon.export_ffs_trt")
         with open(engine, "rb") as f:

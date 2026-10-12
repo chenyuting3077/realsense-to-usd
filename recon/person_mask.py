@@ -26,19 +26,20 @@ MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 
 
+class Person(torch.nn.Module):
+    """A torchvision segmentation model: normalized Nx3xHxW -> NxHxW bool person."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.m = model
+
+    def forward(self, x):
+        return self.m(x)["out"].argmax(1) == PERSON
+
+
 def load_model():
-    """fp16 PyTorch model: normalized Nx3xHxW -> NxHxW bool person."""
     from torchvision.models.segmentation import DeepLabV3_ResNet50_Weights, deeplabv3_resnet50
-
-    class Person(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.m = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.DEFAULT, aux_loss=None)
-
-        def forward(self, x):
-            return self.m(x)["out"].argmax(1) == PERSON
-
-    return Person().cuda().eval().half()
+    return Person(deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.DEFAULT, aux_loss=None)).cuda().eval().half()
 
 
 def normalize(colors):

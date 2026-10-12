@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -82,7 +83,8 @@ class IrExposure:
     def __init__(self, sensor, exposure_ms, max_ms, target):
         import pyrealsense2 as rs
         self.rs, self.s, self.target = rs, sensor, target
-        self.exp, self.min_exp, self.max_exp, self.gain, self.n = exposure_ms * 1000, exposure_ms * 1000, max_ms * 1000, 64, 0
+        self.exp = self.min_exp = exposure_ms * 1000
+        self.max_exp, self.gain, self.n = max_ms * 1000, 64, 0
         self.applied = (self.exp, self.gain)
         self.s.set_option(rs.option.enable_auto_exposure, 0)
         self._apply()
@@ -153,7 +155,6 @@ class Latest:
 
 def replay_source(frames, meta, w0, off, on, stop):
     """A recording (rec/) at its own clock, from wall time w0 (perf_counter, the same in every process)."""
-    import cv2
     ir_ns = [int(round(f["timestamp_ms"] * 1e6)) for f in meta["stereo"]["frames"]]
     color_ns = [int(round(f["timestamp_ms"] * 1e6)) for f in meta["frames"]]
     t0 = min(ir_ns[0], color_ns[0])
@@ -372,9 +373,7 @@ class Recorder:
     are dropped, so the streams stay numbered together."""
 
     def __init__(self, out, meta, workers=6, max_pending=90):
-        from concurrent.futures import ThreadPoolExecutor
-        import cv2
-        self.cv2, self.out, self.meta = cv2, out, meta
+        self.out, self.meta = out, meta
         for d in ("color", "ir1", "ir2", "ir1_on", "ir2_on"):
             os.makedirs(os.path.join(out, d), exist_ok=True)
         self.pool = ThreadPoolExecutor(workers, initializer=lambda: os.setpriority(
@@ -384,7 +383,7 @@ class Recorder:
 
     def _write(self, d, k, img):
         try:
-            self.cv2.imwrite(os.path.join(self.out, d, f"{k:06d}.png"), img, [self.cv2.IMWRITE_PNG_COMPRESSION, 1])
+            cv2.imwrite(os.path.join(self.out, d, f"{k:06d}.png"), img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
         finally:
             self.sem.release()
 
@@ -401,7 +400,7 @@ class Recorder:
 
     def add_on(self, t_ms, color, ir1, ir2):
         k = len(self.on)
-        if self._put([("color", k, self.cv2.cvtColor(color, self.cv2.COLOR_RGB2BGR)), ("ir1_on", k, ir1),
+        if self._put([("color", k, cv2.cvtColor(color, cv2.COLOR_RGB2BGR)), ("ir1_on", k, ir1),
                       ("ir2_on", k, ir2)]):
             self.on.append({"timestamp_ms": t_ms})
 
