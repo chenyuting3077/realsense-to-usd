@@ -20,7 +20,7 @@ from recon.ffs import FFS, engine_path
 
 ETH3D = os.path.expanduser("~/datasets/eth3d")
 SETTINGS = [("848x480, max_disp 192 (before)", engine_path(precision="tf32"), 1.0),
-            ("636x360 (0.75x), max_disp 192 (used then)", engine_path(384, 640, precision="tf32"), 0.75),
+            ("636x360 (0.75x), max_disp 192", engine_path(384, 640, precision="tf32"), 0.75),
             ("848x480, max_disp 128", engine_path(max_disp=128, precision="tf32"), 1.0)]
 BINS = [0.2, 0.35, 1, 2, 3, 4, 5]
 

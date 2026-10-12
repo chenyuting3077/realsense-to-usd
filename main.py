@@ -229,7 +229,7 @@ def view_map(mapper, tracker, status, frame, mesh=None):
 
 class FrameWriter:
     """The frames given to the mapper as a frames dir: their PNGs written as they come by a
-    low-priority thread pool (all at Stop took ~1 s), meta.json and the final poses at the end."""
+    low-priority thread pool, meta.json and the final poses at the end."""
 
     def __init__(self, out, meta):
         self.out, self.meta, self.jobs = out, meta, []

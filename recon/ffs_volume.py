@@ -1,9 +1,7 @@
 """ONNX-compatible cost volumes for the FFS export, the same values as FFS's scripts/make_single_onnx.py
 ones (up to rounding) with less work: the target shifted by one Gather (not maxdisp pads stacked), the
 group-wise correlation as matrix products with each feature vector normalized once (not once per
-disparity: a vector shifted in from the padding is zero either way). At 848x480 the engine takes
-127 -> 111 ms (TF32) for the Gather and the single normalization, 74 -> 62 ms (fp16 autocast) for the
-matrix products (docs/profile)."""
+disparity: a vector shifted in from the padding is zero either way)."""
 import torch
 import torch.nn.functional as F
 

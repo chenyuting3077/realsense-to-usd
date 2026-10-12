@@ -4,8 +4,7 @@
 
 即時深度的速度卡在 FFS（depth thread 其他部分約 15 ms）。兩種加速方式，和之前的設定比較
 （848x480 IR 補到 864、max disparity 192、TensorRT fp32 + TF32、8 次迭代），Jetson AGX Thor。
-**main.py 從這裡開始用 636x360；現在改用 848x480 + FFS 自己的 fp16 autocast，比 636x360 TF32 快、精度和 848x480 TF32 一樣：
-[docs/profile](../profile/README.zh-TW.md)。** 用 [`eval_ffs.py`](eval_ffs.py) 重現：
+main.py 的 FFS 設定：[docs/profile](../profile/README.zh-TW.md)。用 [`eval_ffs.py`](eval_ffs.py) 重現：
 
 ```bash
 python -m recon.export_ffs_trt                            # 636x360 補到 640x384（預設）
@@ -16,7 +15,7 @@ python -m docs.ffs_speed.eval_ffs output/live_20261012_160515/rec output/live_20
 | | 延遲 | fps | ETH3D EPE | bad-1 | bad-2 | 推估誤差 2.5 m / 4 m |
 |---|---:|---:|---:|---:|---:|---:|
 | 848x480，max_disp 192（之前） | 142.1 ms | 7.0 | 0.201 px | 1.63% | 0.66% | 31 / 79 mm |
-| **636x360（0.75 倍），max_disp 192（現在用）** | **81.4 ms** | **12.3** | 0.220 px | 2.02% | 0.83% | 34 / 86 mm |
+| **636x360（0.75 倍），max_disp 192** | **81.4 ms** | **12.3** | 0.220 px | 2.02% | 0.83% | 34 / 86 mm |
 | 848x480，max_disp 128 | 98.9 ms | 10.1 | 0.201 px | 1.61% | 0.64% | 31 / 79 mm |
 
 - 延遲：一組 848x480 IR，模型呼叫（縮圖、正規化、補邊、推論、視差放回 848x480），熱機 10 次後 50 次的平均。
@@ -55,4 +54,3 @@ D455 的資料沒有 ground truth：下表是各設定和 848x480、max_disp 192
 - **636x360**：快 1.75 倍（12.3 fps）。距離越遠越不準：ETH3D EPE 多 10%；D455 上和 848x480 的差異中位數
   2–3 m 是 2.3 cm、3–4 m 是 5 cm、4–5 m 是 8 cm（p90 35–84 cm：邊緣與遠處、紋理弱的地方）。近距離沒有損失。
 - 即時地圖（深度 ≤ 2.5 m）兩者都可以用；最終 mesh 用到 4 m，max_disp 128 保住遠處的精度。
-  main.py 用 636x360：最快，近拍也不會沒有深度。

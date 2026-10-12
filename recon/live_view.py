@@ -24,8 +24,8 @@ STAGES = [("start", "Start"), ("record", "Record"), ("trajectory", "Final trajec
 
 def desktop_display():
     """{DISPLAY, XAUTHORITY} of this user's desktop session, for a window opened over ssh: from the
-    environment of the user's session processes (gnome-shell first), not a fixed :0 or :1, which
-    changes between boots. {} when there is none."""
+    environment of the user's session processes (gnome-shell first): the display number changes
+    between boots. {} when there is none."""
     found = []
     for pid in os.listdir("/proc"):
         try:

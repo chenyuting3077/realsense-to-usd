@@ -4,8 +4,7 @@
 
 FFS limits the live depth rate (the rest of the depth thread adds ~15 ms). Two ways to make it faster, against the setting
 used before (848x480 IR padded to 864, max disparity 192, TensorRT fp32 + TF32, 8 iterations), on the Jetson AGX Thor.
-**main.py used 636x360 from here; now 848x480 with FFS's own fp16 autocast, faster than 636x360 TF32 and as accurate as
-848x480 TF32: [docs/profile](../profile/README.md).** Reproduce with [`eval_ffs.py`](eval_ffs.py):
+main.py's FFS setting: [docs/profile](../profile/README.md). Reproduce with [`eval_ffs.py`](eval_ffs.py):
 
 ```bash
 python -m recon.export_ffs_trt                            # 636x360 padded to 640x384 (the default)
@@ -16,7 +15,7 @@ python -m docs.ffs_speed.eval_ffs output/live_20261012_160515/rec output/live_20
 | | Latency | fps | ETH3D EPE | bad-1 | bad-2 | Est. error at 2.5 m / 4 m |
 |---|---:|---:|---:|---:|---:|---:|
 | 848x480, max_disp 192 (before) | 142.1 ms | 7.0 | 0.201 px | 1.63% | 0.66% | 31 / 79 mm |
-| **636x360 (0.75x), max_disp 192 (used now)** | **81.4 ms** | **12.3** | 0.220 px | 2.02% | 0.83% | 34 / 86 mm |
+| **636x360 (0.75x), max_disp 192** | **81.4 ms** | **12.3** | 0.220 px | 2.02% | 0.83% | 34 / 86 mm |
 | 848x480, max_disp 128 | 98.9 ms | 10.1 | 0.201 px | 1.61% | 0.64% | 31 / 79 mm |
 
 - Latency: one 848x480 IR pair, model call (downscaling, normalization, padding, inference, disparity back to 848x480),
@@ -56,4 +55,3 @@ The final mesh has more triangles from the 1.6× depth frames (more of the room 
 - **636x360**: 1.75× faster (12.3 fps). Less precise with distance: ETH3D EPE +10%, on the D455 a median difference of
   2.3 cm at 2–3 m, 5 cm at 3–4 m and 8 cm at 4–5 m (p90 35–84 cm: edges and far, weak texture). It keeps the close range.
 - For the live map (depth ≤ 2.5 m) both are usable; for the final mesh up to 4 m, max_disp 128 keeps the far range.
-  main.py uses 636x360: the fastest, without losing close-ups.
