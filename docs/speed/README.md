@@ -190,7 +190,7 @@ stream right before FFS it costs nothing (FFS 70.9 vs 71.0 ms, 0.1 ms wait). Wit
 
 ## CPU governor
 
-`jetson_clocks` locks GPU and memory but leaves the CPUs on `schedutil`; with `performance` (`system/cpu-performance.service`)
+`jetson_clocks` locks GPU and memory but leaves the CPUs on `schedutil`; with `performance` (a service, see docs/install)
 ORB-SLAM3 goes 32.2 → 22.1 ms and nearly no IR pair is skipped.
 
 ## After Stop

@@ -102,10 +102,25 @@ patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中
 ### Jetson
 
 ```bash
-sudo jetson_clocks   # GPU 與記憶體鎖最高時脈（否則 GPU 在兩次 FFS 之間降頻）
-# 每次開機後要重跑（或設成 service）
-# CPU 也鎖最高，每次開機自動：JetPack 7.1 的 jetson_clocks 不動 CPU（schedutil，972–2601 MHz），
-# ORB-SLAM3 每幀會是 32 ms 而不是 22 ms（docs/speed）
-sudo cp system/cpu-performance.service /etc/systemd/system/
+sudo jetson_clocks   # GPU 與記憶體鎖最高時脈（否則 GPU 在兩次 FFS 之間降頻）；每次開機後要重跑
+```
+
+`jetson_clocks` 不動 CPU（仍是 `schedutil`）；CPU 鎖最高時 ORB-SLAM3 每幀 22 ms 而不是 32 ms
+（[docs/speed](../speed/README.zh-TW.md)）。每次開機自動設定：
+
+```bash
+sudo tee /etc/systemd/system/cpu-performance.service > /dev/null <<'EOF'
+[Unit]
+Description=CPU governor performance
+After=nvpmodel.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do echo performance > "$g"; done'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
 sudo systemctl enable --now cpu-performance.service
 ```

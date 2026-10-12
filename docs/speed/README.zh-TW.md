@@ -188,7 +188,7 @@ MobileNetV3 會漏掉只露出一部分的人。分割放在獨立執行緒時�
 
 ## CPU governor
 
-`jetson_clocks` 鎖了 GPU 和記憶體，CPU 仍是 `schedutil`；改成 `performance`（`system/cpu-performance.service`）後
+`jetson_clocks` 鎖了 GPU 和記憶體，CPU 仍是 `schedutil`；改成 `performance`（開機 service，見 docs/install）後
 ORB-SLAM3 32.2 → 22.1 ms，幾乎不再跳過 IR。
 
 ## Stop 之後

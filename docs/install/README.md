@@ -103,10 +103,25 @@ off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh), an
 ### Jetson
 
 ```bash
-sudo jetson_clocks   # GPU and memory clocks at max (otherwise the GPU idles down between FFS calls)
-# again after every reboot (or enabled as a service)
-# The CPUs at max too, at every boot: JetPack 7.1's jetson_clocks leaves them to schedutil (972-2601 MHz),
-# ORB-SLAM3 then takes 32 instead of 22 ms a frame (docs/speed)
-sudo cp system/cpu-performance.service /etc/systemd/system/
+sudo jetson_clocks   # GPU and memory clocks at max (otherwise the GPU idles down between FFS calls); again after every reboot
+```
+
+`jetson_clocks` leaves the CPUs on `schedutil`; at their highest clock ORB-SLAM3 takes 22 instead of 32 ms a frame
+([docs/speed](../speed/README.md)). To set it at every boot:
+
+```bash
+sudo tee /etc/systemd/system/cpu-performance.service > /dev/null <<'EOF'
+[Unit]
+Description=CPU governor performance
+After=nvpmodel.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do echo performance > "$g"; done'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
 sudo systemctl enable --now cpu-performance.service
 ```

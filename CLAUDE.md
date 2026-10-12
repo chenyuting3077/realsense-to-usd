@@ -15,4 +15,4 @@
 
 - docs/ holds documents only (README.md / README.zh-TW.md, images). No code there: benchmark and evaluation
   scripts go to bench/<area>/ (live, ffs, seg, ...; run as `python -m bench.<area>.<name>` or
-  `bench/<area>/<name>.sh`), system config files to system/.
+  `bench/<area>/<name>.sh`). System setup goes into docs/install as instructions.
