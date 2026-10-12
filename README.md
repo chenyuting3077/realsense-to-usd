@@ -49,6 +49,7 @@ See [INSTALL.md](docs/INSTALL.md): the conda env, nvblox, ORB-SLAM3 and its Pyth
 ## Usage
 
 ```bash
+conda activate realsense-to-usd
 ./run_live.sh -o output/live_room   # Stop in the window or Ctrl+C to end
 ./run_offline.sh output/live_room   # -> output/live_room/scene.usdc
 ```

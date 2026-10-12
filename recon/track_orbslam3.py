@@ -23,7 +23,7 @@ Output:
 
 Needs ORB-SLAM3 built with patches/orbslam3-thor.patch in --orb-root and Pangolin, see docs/INSTALL.md.
 
-Usage (after `source env.sh`):
+Usage (in the activated conda env):
   python recon/track_orbslam3.py output/room/rec -o output/room/orbslam3
 """
 import argparse

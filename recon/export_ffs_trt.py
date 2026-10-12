@@ -10,7 +10,7 @@ typed networks, so the precision is fixed in the ONNX:
          the fp32 ONNX to fp16 instead gives NaN disparities); calibrated on --calib-n IR pairs
          of another recording (--calib)
 
-Usage (after `source env.sh`; TensorRT from pip: tensorrt-cu13):
+Usage (in the activated conda env; TensorRT from pip: tensorrt-cu13):
   python recon/export_ffs_trt.py -o output/ffs            # fp32 + TF32, 8 iterations (~4 min)
   -> output/ffs/ffs_480x640_it8_fp32.onnx, ffs_480x640_it8_fp32_tf32.engine
   python recon/export_ffs_trt.py -o output/ffs --width 864   # 848x480 (width padded to 32): what live.py uses

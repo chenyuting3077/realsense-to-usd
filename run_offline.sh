@@ -20,7 +20,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 s=$(realpath "$1")
 [[ -f $s/frames/poses.npy ]] || { echo "$s/frames/poses.npy not found: not a run_live.sh session?" >&2; exit 1; }
 cd "$here"
-source env.sh
+[[ ${CONDA_DEFAULT_ENV:-base} != base ]] || { echo "conda activate the env first (docs/INSTALL.md)" >&2; exit 1; }
 
 python recon/reconstruct.py "$s/frames" -o "$s/recon" --poses "$s/frames/poses.npy" \
     --depth-dir depth_ffs --depth-max 4 --weighting distance --weight-ref 2

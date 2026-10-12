@@ -2,13 +2,14 @@
 
 [English](INSTALL.md)
 
-全部在同一個 conda 環境裡跑（預設名稱 `realsense-to-usd`，用別的名稱時設 `RS2USD_ENV`）。
-`source env.sh` 會啟用環境、把 `CUDA_HOME` 指到環境裡 pip 安裝的 CUDA 13 toolkit，並把 repo 根目錄加進 `PYTHONPATH`。
-所有指令都在 repo 根目錄執行。
+全部在同一個 conda 環境裡跑（下面用 `realsense-to-usd`，名稱不限）。所有指令都在 repo 根目錄執行。
+`export` 那行只給這頁的編譯用（指到環境裡 pip 安裝的 CUDA 13 toolkit），整個安裝過程請用同一個終端機。
+裝好之後，每次使用只要 `conda activate realsense-to-usd`。
 
 ```bash
 conda create -n realsense-to-usd python=3.12 "numpy>=2" imageio matplotlib pip
-source env.sh
+conda activate realsense-to-usd
+export CUDA_HOME=$CONDA_PREFIX/lib/python3.12/site-packages/nvidia/cu13 && export PATH=$CUDA_HOME/bin:$PATH
 pip install torch==2.9.1+cu130 torchvision --index-url https://download.pytorch.org/whl/cu130/
 pip install "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-cccl==13.0.*" "nvidia-cuda-crt==13.0.*" \
     "nvidia-nvvm==13.0.*" "nvidia-npp==13.*" ninja open3d==0.20.0 pyrealsense2 opencv-python-headless \

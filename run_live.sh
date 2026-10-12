@@ -12,7 +12,7 @@
 # (ORB-SLAM3 with the D455's IMU, which carries blurred or blank seconds). With --imu hold the
 # camera still for a second (leveling), then move it: tracking starts once the IMU sees some motion.
 #
-# Before starting: max clocks (jetson_clocks, set at boot on this machine), a D455 on USB 3, and
+# Before starting: max clocks (sudo jetson_clocks, after every boot), a D455 on USB 3, and
 # the free disk space (rec/ takes ~40 MB/s, 2.4 GB a minute).
 # Output (see recon/live.py): mesh_live.ply, poses_live.npy, live.json, frames/ (the fused
 # frames with FFS depth), rec/ (every frameset: color, D455 depth, IR, poses.npy).
@@ -22,7 +22,7 @@
 set -eo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
-source env.sh
+[[ ${CONDA_DEFAULT_ENV:-base} != base ]] || { echo "conda activate the env first (docs/INSTALL.md)" >&2; exit 1; }
 
 free_gb=$(df -BG --output=avail output 2>/dev/null | tail -1 | tr -dc 0-9)
 if [[ -n $free_gb && $free_gb -lt 20 ]]; then

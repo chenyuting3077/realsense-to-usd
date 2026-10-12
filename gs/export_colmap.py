@@ -16,12 +16,14 @@ Usage:
 import argparse
 import os
 import shutil
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
 import open3d as o3d
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "recon"))
 from frames import filter_depth, intrinsic_matrix, load_meta
 
 

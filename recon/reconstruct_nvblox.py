@@ -3,7 +3,7 @@
 nvblox does not estimate camera poses; they come from track_orbslam3.py (or reconstruct.py's
 Open3D odometry on CUDA machines), saved as poses.npy.
 
-Usage (after `source env.sh`):
+Usage (in the activated conda env):
   python recon/reconstruct_nvblox.py output/room/frames output/room/frames/poses.npy -o output/room/recon
 """
 import argparse

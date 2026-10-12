@@ -49,6 +49,7 @@ run_offline.sh：frames/ ──► TSDF + 點雲 ──► COLMAP text ──►
 ## 使用
 
 ```bash
+conda activate realsense-to-usd
 ./run_live.sh -o output/live_room   # 按視窗的 Stop 或 Ctrl+C 結束
 ./run_offline.sh output/live_room   # -> output/live_room/scene.usdc
 ```

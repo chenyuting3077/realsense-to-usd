@@ -21,7 +21,7 @@ meters; a root transform levels the scene, from the dominant horizontal plane of
 The Gaussians are the visual layer: the mesh is invisible unless --show-mesh (the collider
 is always invisible).
 
-Usage (after `source env.sh`):
+Usage (in the activated conda env):
   python gs/export_usd.py output/room/recon/mesh.ply output/room/fastgs/point_cloud.ply \
       --poses output/room/frames/poses.npy -o output/room/scene.usdc
 """

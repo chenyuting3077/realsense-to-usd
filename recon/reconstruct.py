@@ -8,7 +8,7 @@ Pipeline: color + aligned depth -> depth filtering
 Open3D's frame-to-model tracking needs CUDA (its bilateral filter has no CPU kernel);
 the aarch64 Open3D wheels (e.g. Jetson Thor) are CPU-only, so there --poses is required.
 
-Usage (after `source env.sh`):
+Usage (in the activated conda env):
   python recon/reconstruct.py output/room/frames -o output/room/recon --poses output/room/frames/poses.npy
   # depth up to 4 m, near observations weighted higher (Triton integration on the GPU)
   python recon/reconstruct.py output/room/frames -o output/room/recon --poses output/room/frames/poses.npy \
@@ -17,6 +17,7 @@ Usage (after `source env.sh`):
 import argparse
 import json
 import os
+import sysconfig
 import time
 
 import numpy as np
@@ -80,6 +81,8 @@ def _integrate_kernel():
     global _KERNEL
     if _KERNEL is not None:
         return _KERNEL
+    # Triton's bundled ptxas does not know Thor (sm_110a): the CUDA 13 one pip-installed into the env
+    os.environ.setdefault("TRITON_PTXAS_PATH", os.path.join(sysconfig.get_paths()["purelib"], "nvidia/cu13/bin/ptxas"))
     import triton
     import triton.language as tl
 
