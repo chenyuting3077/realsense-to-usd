@@ -1,0 +1,233 @@
+diff --git a/scene/cameras.py b/scene/cameras.py
+index abf6e52..bcb883f 100755
+--- a/scene/cameras.py
++++ b/scene/cameras.py
+@@ -17,7 +17,8 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix
+ class Camera(nn.Module):
+     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
+                  image_name, uid,
+-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
++                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
++                 cx_frac=0.5, cy_frac=0.5
+                  ):
+         super(Camera, self).__init__()
+ 
+@@ -52,7 +53,8 @@ class Camera(nn.Module):
+         self.scale = scale
+ 
+         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
+-        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
++        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy,
++                                                     cx_frac=cx_frac, cy_frac=cy_frac).transpose(0,1).cuda()
+         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+         self.camera_center = self.world_view_transform.inverse()[3, :3]
+ 
+diff --git a/scene/dataset_readers.py b/scene/dataset_readers.py
+index 2a6f904..d535f7f 100755
+--- a/scene/dataset_readers.py
++++ b/scene/dataset_readers.py
+@@ -34,6 +34,9 @@ class CameraInfo(NamedTuple):
+     image_name: str
+     width: int
+     height: int
++    # principal point as a fraction of the image size; 3DGS assumed (0.5, 0.5)
++    cx_frac: float = 0.5
++    cy_frac: float = 0.5
+ 
+ class SceneInfo(NamedTuple):
+     point_cloud: BasicPointCloud
+@@ -86,11 +89,13 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+             focal_length_x = intr.params[0]
+             FovY = focal2fov(focal_length_x, height)
+             FovX = focal2fov(focal_length_x, width)
++            cx, cy = intr.params[1], intr.params[2]
+         elif intr.model=="PINHOLE":
+             focal_length_x = intr.params[0]
+             focal_length_y = intr.params[1]
+             FovY = focal2fov(focal_length_y, height)
+             FovX = focal2fov(focal_length_x, width)
++            cx, cy = intr.params[2], intr.params[3]
+         else:
+             assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+ 
+@@ -99,7 +104,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+         image = Image.open(image_path)
+ 
+         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+-                              image_path=image_path, image_name=image_name, width=width, height=height)
++                              image_path=image_path, image_name=image_name, width=width, height=height,
++                              cx_frac=cx / width, cy_frac=cy / height)
+         cam_infos.append(cam_info)
+     sys.stdout.write('\n')
+     return cam_infos
+diff --git a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/auxiliary.h b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/auxiliary.h
+index 27d372d..1bc7267 100755
+--- a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/auxiliary.h
++++ b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/auxiliary.h
+@@ -204,7 +204,7 @@ __device__ inline uint32_t processTiles(
+     float2 bbox_argmin, float2 bbox_argmax,
+     int2 rect_min, int2 rect_max,
+     const dim3 grid, const bool isY,
+-    uint32_t idx, uint32_t off, float depth,
++    uint32_t idx, uint32_t off, uint32_t end, float depth,
+     uint64_t* gaussian_keys_unsorted,
+     uint32_t* gaussian_values_unsorted
+     )
+@@ -292,7 +292,10 @@ __device__ inline uint32_t processTiles(
+         // Only update keys array if it exists.
+         if (gaussian_keys_unsorted != nullptr) {
+           // Loop over tiles and add to keys array
+-          for (int v = min_tile_v; v < max_tile_v; v++)
++          // end: this Gaussian's slots counted in preprocess. The count and this
++          // write pass are compiled separately and can round differently at
++          // tile borders; never write into the next Gaussian's (or past the) buffer.
++          for (int v = min_tile_v; v < max_tile_v && off < end; v++)
+           {
+             // For each tile that the Gaussian overlaps, emit a
+             // key/value pair. The key is |  tile ID  |      depth      |,
+@@ -317,7 +320,7 @@ __device__ inline uint32_t processTiles(
+ // This is built upon Speedy-Splat — many thanks for their excellent work.
+ __device__ inline uint32_t duplicateToTilesTouched(
+     const float2 p, const float4 con_o, const dim3 grid, const float mult,
+-    uint32_t idx, uint32_t off, float depth,
++    uint32_t idx, uint32_t off, uint32_t end, float depth,
+     uint64_t* gaussian_keys_unsorted,
+     uint32_t* gaussian_values_unsorted
+     )
+@@ -380,7 +383,7 @@ __device__ inline uint32_t duplicateToTilesTouched(
+         bbox_argmin, bbox_argmax,
+         rect_min, rect_max,
+         grid, isY,
+-        idx, off, depth,
++        idx, off, end, depth,
+         gaussian_keys_unsorted,
+         gaussian_values_unsorted
+     );
+diff --git a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/forward.cu b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/forward.cu
+index 50c844d..bada625 100755
+--- a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/forward.cu
++++ b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/forward.cu
+@@ -15,6 +15,12 @@
+ #include "cuda_runtime.h"
+ #include "device_launch_parameters.h"
+ #include <cub/cub.cuh>
++#if CUDART_VERSION >= 13000  // cub::Max was removed in CCCL 3 (CUDA 13)
++#include <cuda/functional>
++#define FASTGS_MAX_OP ::cuda::maximum<>()
++#else
++#define FASTGS_MAX_OP cub::Max()
++#endif
+ #include <cooperative_groups.h>
+ #include <cooperative_groups/reduce.h>
+ namespace cg = cooperative_groups;
+@@ -243,7 +249,7 @@ __global__ void preprocessCUDA(
+ 	float4 con_o = { conic.x, conic.y, conic.z, opacities[idx] };
+     // Only counts tiles touched when nullptr is passed as array argment. 
+ 	// This is built upon Speedy-Splat — many thanks for their excellent work.
+-    uint32_t tiles_count = duplicateToTilesTouched(point_image, con_o, grid, mult, 0, 0, 0, nullptr, nullptr);
++    uint32_t tiles_count = duplicateToTilesTouched(point_image, con_o, grid, mult, 0, 0, 0, 0, nullptr, nullptr);
+     if (tiles_count == 0)
+         return;
+ 
+@@ -431,7 +437,7 @@ renderCUDA(
+ 	// max reduce the last contributor
+     typedef cub::BlockReduce<uint32_t, BLOCK_X, cub::BLOCK_REDUCE_WARP_REDUCTIONS, BLOCK_Y> BlockReduce;
+     __shared__ typename BlockReduce::TempStorage temp_storage;
+-    last_contributor = BlockReduce(temp_storage).Reduce(last_contributor, cub::Max());
++    last_contributor = BlockReduce(temp_storage).Reduce(last_contributor, FASTGS_MAX_OP);
+ 	if (block.thread_rank() == 0) {
+ 		max_contrib[tile_id] = last_contributor;
+ 	}
+diff --git a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.cu b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.cu
+index 12e1c04..37fc6d1 100755
+--- a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.cu
++++ b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.cu
+@@ -138,13 +138,21 @@ __global__ void duplicateWithKeys(
+ 	{
+ 		// Find this Gaussian's offset in buffer for writing keys/values.
+ 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
++		uint32_t end = offsets[idx];
+     // Update unsorted arrays with Gaussian idx for every tile that
+     // Gaussian touches
+-    duplicateToTilesTouched(
++    uint32_t n = duplicateToTilesTouched(
+         points_xy[idx], con_o[idx], grid, mult,
+-        idx, off, depths[idx],
++        idx, off, end, depths[idx],
+         gaussian_keys_unsorted,
+         gaussian_values_unsorted);
++		// Slots the write pass did not reach get an invalid tile ID, which sorts
++		// after every real tile and is skipped by identifyTileRanges.
++		for (uint32_t i = off + min(n, end - off); i < end; i++)
++		{
++			gaussian_keys_unsorted[i] = ~0ull;
++			gaussian_values_unsorted[i] = idx;
++		}
+ 	}
+ }
+ 
+@@ -164,7 +172,10 @@ __global__ void identifyTileRanges(int L, uint64_t* point_list_keys, uint2* rang
+ 	bool valid_tile = currtile != (uint32_t) -1;
+ 
+ 	if (idx == 0)
+-		ranges[currtile].x = 0;
++	{
++		if (valid_tile)
++			ranges[currtile].x = 0;
++	}
+ 	else
+ 	{
+ 		uint32_t prevtile = point_list_keys[idx - 1] >> 32;
+diff --git a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.h b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.h
+index 2370948..f95c499 100755
+--- a/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.h
++++ b/submodules/diff-gaussian-rasterization_fastgs/cuda_rasterizer/rasterizer_impl.h
+@@ -11,6 +11,8 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
++
+ #include <iostream>
+ #include <vector>
+ #include "rasterizer.h"
+diff --git a/utils/camera_utils.py b/utils/camera_utils.py
+index 1a54d0a..93fc75b 100755
+--- a/utils/camera_utils.py
++++ b/utils/camera_utils.py
+@@ -49,7 +49,8 @@ def loadCam(args, id, cam_info, resolution_scale):
+     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
+                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
+                   image=gt_image, gt_alpha_mask=loaded_mask,
+-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
++                  image_name=cam_info.image_name, uid=id, data_device=args.data_device,
++                  cx_frac=cam_info.cx_frac, cy_frac=cam_info.cy_frac)
+ 
+ def cameraList_from_camInfos(cam_infos, resolution_scale, args):
+     camera_list = []
+diff --git a/utils/graphics_utils.py b/utils/graphics_utils.py
+index b4627d8..019b0b9 100755
+--- a/utils/graphics_utils.py
++++ b/utils/graphics_utils.py
+@@ -48,7 +48,7 @@ def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+     Rt = np.linalg.inv(C2W)
+     return np.float32(Rt)
+ 
+-def getProjectionMatrix(znear, zfar, fovX, fovY):
++def getProjectionMatrix(znear, zfar, fovX, fovY, cx_frac=0.5, cy_frac=0.5):
+     tanHalfFovY = math.tan((fovY / 2))
+     tanHalfFovX = math.tan((fovX / 2))
+ 
+@@ -63,8 +63,10 @@ def getProjectionMatrix(znear, zfar, fovX, fovY):
+ 
+     P[0, 0] = 2.0 * znear / (right - left)
+     P[1, 1] = 2.0 * znear / (top - bottom)
+-    P[0, 2] = (right + left) / (right - left)
+-    P[1, 2] = (top + bottom) / (top - bottom)
++    # Off-center principal point (COLMAP cx, cy as a fraction of the image size):
++    # shifts the projected NDC so pixel cx maps to the principal point, not the image center.
++    P[0, 2] = (right + left) / (right - left) + 2.0 * cx_frac - 1.0
++    P[1, 2] = (top + bottom) / (top - bottom) + 2.0 * cy_frac - 1.0
+     P[3, 2] = z_sign
+     P[2, 2] = z_sign * zfar / (zfar - znear)
+     P[2, 3] = -(zfar * znear) / (zfar - znear)

@@ -1,0 +1,268 @@
+diff --git a/cmake/cuda/setup_compute_capability.cmake b/cmake/cuda/setup_compute_capability.cmake
+index 50bbc36..103ca41 100644
+--- a/cmake/cuda/setup_compute_capability.cmake
++++ b/cmake/cuda/setup_compute_capability.cmake
+@@ -58,12 +58,10 @@ foreach(ARCH IN LISTS CMAKE_CUDA_ARCHITECTURES)
+   if(num_digits EQUAL 2)
+     set(DOT_SEPARATED "${FIRST_DIGIT}.${SECOND_DIGIT}")
+   else()
+-    # Currently, Caffe2 only support Cuda architectues up to 9.0
+-    message(
+-      WARNING
+-        "Cuda architecture ${ARCH} not supported for nvblox_torch. Reverting to 9.0 and hoping for backward compatibility"
+-    )
+-    set(DOT_SEPARATED "9.0")
++    # Three digits, e.g. 110 -> 11.0 (Jetson Thor), 120 -> 12.0
++    string(SUBSTRING "${ARCH}" 0 2 FIRST_DIGITS)
++    string(SUBSTRING "${ARCH}" 2 1 LAST_DIGIT)
++    set(DOT_SEPARATED "${FIRST_DIGITS}.${LAST_DIGIT}")
+   endif()
+   # Append to the result list
+   list(APPEND TORCH_CUDA_ARCH_LIST "${DOT_SEPARATED}")
+diff --git a/nvblox/include/nvblox/integrators/internal/cuda/impl/projective_tsdf_integrator_impl.cuh b/nvblox/include/nvblox/integrators/internal/cuda/impl/projective_tsdf_integrator_impl.cuh
+index e796b69..ab3f765 100644
+--- a/nvblox/include/nvblox/integrators/internal/cuda/impl/projective_tsdf_integrator_impl.cuh
++++ b/nvblox/include/nvblox/integrators/internal/cuda/impl/projective_tsdf_integrator_impl.cuh
+@@ -49,6 +49,12 @@ struct UpdateTsdfVoxelFunctor {
+     if (voxel_to_surface_distance < -truncation_distance_m_) {
+       return false;
+     }
++    // Free space is only cleared up to this distance in front of the surface
++    // (disabled when < 0).
++    if (max_free_space_distance_m_ >= 0.F &&
++        voxel_to_surface_distance > max_free_space_distance_m_) {
++      return false;
++    }
+ 
+     // Dynamic discrepancy check (disabled when threshold < 0).
+     // Voxels (with weight >= dynamic_discrepancy_min_weight_) whose
+@@ -107,6 +113,7 @@ struct UpdateTsdfVoxelFunctor {
+   }
+ 
+   float truncation_distance_m_ = 0.2f;
++  float max_free_space_distance_m_ = -1.0f;
+   float max_weight_ = kProjectiveIntegratorMaxWeightParamDesc.default_value;
+   float invalid_depth_decay_factor_ =
+       kProjectiveIntegratorMaxWeightParamDesc.default_value;
+diff --git a/nvblox/include/nvblox/mapper/internal/impl/mapper_impl.h b/nvblox/include/nvblox/mapper/internal/impl/mapper_impl.h
+index a23e787..697b747 100644
+--- a/nvblox/include/nvblox/mapper/internal/impl/mapper_impl.h
++++ b/nvblox/include/nvblox/mapper/internal/impl/mapper_impl.h
+@@ -113,16 +113,23 @@ template <typename SensorType>
+ void Mapper::integrateColor(const ColorImage& color_frame,
+                             const DepthImage& depth_frame,
+                             const Transform& T_L_C, const SensorType& sensor) {
++  integrateColor(MaskedColorImageConstView(color_frame, kMaskActiveEverywhere),
++                 MaskedDepthImageConstView(depth_frame, kMaskActiveEverywhere),
++                 T_L_C, sensor);
++}
++
++template <typename SensorType>
++void Mapper::integrateColor(const MaskedColorImageConstView& color_frame,
++                            const MaskedDepthImageConstView& depth_frame,
++                            const Transform& T_L_C, const SensorType& sensor) {
+   static_assert(is_sensor_interface<SensorType>::value,
+                 "Sensor does not match the required interface");
+ 
+   if (hasTsdfLayer(projective_layer_type_)) {
+     std::vector<Index3D> updated_blocks;
+     color_integrator_.integrateFrame(
+-        MaskedColorImageConstView(color_frame, kMaskActiveEverywhere),
+-        MaskedDepthImageConstView(depth_frame, kMaskActiveEverywhere), T_L_C,
+-        sensor, layers_.get<TsdfLayer>(), layers_.getPtr<ColorLayer>(),
+-        &updated_blocks);
++        color_frame, depth_frame, T_L_C, sensor, layers_.get<TsdfLayer>(),
++        layers_.getPtr<ColorLayer>(), &updated_blocks);
+ 
+     layers_.getPtr<ColorLayer>()->updateGpuHash(*cuda_stream_);
+     blocks_to_update_tracker_.addBlocksToUpdate(
+diff --git a/nvblox/include/nvblox/mapper/mapper.h b/nvblox/include/nvblox/mapper/mapper.h
+index 70ccf19..838465e 100644
+--- a/nvblox/include/nvblox/mapper/mapper.h
++++ b/nvblox/include/nvblox/mapper/mapper.h
+@@ -214,6 +214,10 @@ class Mapper : public MapperBase {
+   void integrateColor(const ColorImage& color_frame,
+                       const DepthImage& depth_frame, const Transform& T_L_C,
+                       const SensorType& sensor);
++  template <typename SensorType>
++  void integrateColor(const MaskedColorImageConstView& color_frame,
++                      const MaskedDepthImageConstView& depth_frame,
++                      const Transform& T_L_C, const SensorType& sensor);
+ 
+   /// Integrates generic features into the reconstruction.
+   ///@param feature_frame Feature image to integrate.
+diff --git a/nvblox/src/core/cuda_stream.cpp b/nvblox/src/core/cuda_stream.cpp
+index b24fa59..2461f1e 100644
+--- a/nvblox/src/core/cuda_stream.cpp
++++ b/nvblox/src/core/cuda_stream.cpp
+@@ -18,6 +18,8 @@ limitations under the License.
+ 
+ #include "glog/logging.h"
+ 
++#include <cstdlib>
++
+ #include "nvblox/core/internal/error_check.h"
+ 
+ namespace nvblox {
+@@ -33,7 +35,12 @@ CudaStreamOwning::~CudaStreamOwning() {
+ 
+ CudaStreamOwning::CudaStreamOwning(const unsigned int flags)
+     : CudaStreamAsync(&stream_) {
+-  checkCudaErrors(cudaStreamCreateWithFlags(&stream_, flags));
++  // NVBLOX_STREAM_PRIORITY (lower is higher, see cudaDeviceGetStreamPriorityRange)
++  // lets nvblox kernels go ahead of other work on the GPU, e.g. a stereo network
++  // running at the same time. Unset: default priority (upstream).
++  const char* priority = std::getenv("NVBLOX_STREAM_PRIORITY");
++  checkCudaErrors(cudaStreamCreateWithPriority(&stream_, flags,
++                                               priority ? std::atoi(priority) : 0));
+ }
+ 
+ void DefaultStream::synchronize() const {
+diff --git a/nvblox/src/integrators/projective_tsdf_integrator.cu b/nvblox/src/integrators/projective_tsdf_integrator.cu
+index c879d99..0ef061e 100644
+--- a/nvblox/src/integrators/projective_tsdf_integrator.cu
++++ b/nvblox/src/integrators/projective_tsdf_integrator.cu
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ /*
+ Copyright 2022 NVIDIA CORPORATION
+ 
+@@ -55,6 +56,12 @@ ProjectiveTsdfIntegrator::getTsdfUpdateFunctorOnDevice(float voxel_size) {
+       dynamic_discrepancy_threshold_m();
+   update_functor_host_ptr_->dynamic_discrepancy_min_weight_ =
+       dynamic_discrepancy_min_weight();
++  // NVBLOX_FREE_SPACE_VOX (set by reconstruct_nvblox.py --free-space-vox)
++  // limits free-space clearing to this many voxels in front of the measured
++  // surface; unset or negative clears along the whole ray (upstream).
++  const char* free_space_vox = std::getenv("NVBLOX_FREE_SPACE_VOX");
++  update_functor_host_ptr_->max_free_space_distance_m_ =
++      free_space_vox ? std::atof(free_space_vox) * voxel_size : -1.0f;
+   // Transfer to the device
+   return update_functor_host_ptr_.cloneAsync(MemoryType::kDevice,
+                                              *cuda_stream_);
+diff --git a/nvblox_torch/cpp/include/nvblox_torch/py_mapper.h b/nvblox_torch/cpp/include/nvblox_torch/py_mapper.h
+index b340e13..3469719 100644
+--- a/nvblox_torch/cpp/include/nvblox_torch/py_mapper.h
++++ b/nvblox_torch/cpp/include/nvblox_torch/py_mapper.h
+@@ -55,6 +55,15 @@ struct Mapper : torch::CustomClassHolder {
+                       std::optional<torch::Tensor> mask_frame_t = std::nullopt,
+                       long mapper_id = -1);
+ 
++  // Color with a depth image aligned to it (same camera and pose): the depth
++  // selects the blocks and handles occlusion, instead of sphere tracing the
++  // TSDF.
++  void integrateColorWithDepth(torch::Tensor color_frame_t,
++                               torch::Tensor depth_frame_t,
++                               torch::Tensor T_L_C_t,
++                               c10::intrusive_ptr<PySensor> sensor,
++                               long mapper_id = -1);
++
+   void integrateFeatures(
+       torch::Tensor feature_frame_t, torch::Tensor T_L_C_t,
+       c10::intrusive_ptr<PySensor> sensor,
+diff --git a/nvblox_torch/cpp/src/py_mapper.cu b/nvblox_torch/cpp/src/py_mapper.cu
+index ffc7f4f..4df404e 100644
+--- a/nvblox_torch/cpp/src/py_mapper.cu
++++ b/nvblox_torch/cpp/src/py_mapper.cu
+@@ -180,6 +180,34 @@ void Mapper::integrateColor(torch::Tensor color_frame_t, torch::Tensor T_L_C_t,
+   }
+ }
+ 
++void Mapper::integrateColorWithDepth(torch::Tensor color_frame_t,
++                                     torch::Tensor depth_frame_t,
++                                     torch::Tensor T_L_C_t,
++                                     c10::intrusive_ptr<PySensor> sensor,
++                                     long mapper_id) {
++  CHECK_LT(mapper_id, static_cast<int>(mappers_.size()));
++  ALL_ON_GPU_OR_RETURN(color_frame_t, depth_frame_t);
++
++  if (!checkSizes(T_L_C_t, {4, 4})) {
++    LOG(WARNING) << "Pose tensor size is not correct";
++    return;
++  }
++  if (!checkImageDimensionsEqual(color_frame_t, depth_frame_t)) {
++    LOG(WARNING) << "Color and depth frame sizes do not match";
++    return;
++  }
++  CHECK_EQ(color_frame_t.sizes()[2], nvblox::kRgbNumElements);
++  if (!sensor->isSensorType<nvblox::Camera>()) {
++    LOG(ERROR) << "Color integration only supported for Camera sensors";
++    return;
++  }
++  mappers_[mapper_id]->integrateColor(
++      masked_view_from_tensor<const nvblox::Color>(color_frame_t),
++      masked_view_from_tensor<const float>(depth_frame_t),
++      copy_transform_from_tensor(T_L_C_t),
++      sensor->getNvbloxSensor<nvblox::Camera>());
++}
++
+ // Template helper for feature integration with any sensor type (Camera only)
+ template <typename SensorType>
+ void integrateFeaturesWithSensorType(
+diff --git a/nvblox_torch/cpp/src/py_nvblox.cu b/nvblox_torch/cpp/src/py_nvblox.cu
+index 5058e1f..4152462 100644
+--- a/nvblox_torch/cpp/src/py_nvblox.cu
++++ b/nvblox_torch/cpp/src/py_nvblox.cu
+@@ -328,6 +328,7 @@ TORCH_LIBRARY(pynvblox, m) {
+                        c10::intrusive_ptr<MapperParams>>())
+       .def("integrate_depth", &Mapper::integrateDepth)
+       .def("integrate_color", &Mapper::integrateColor)
++      .def("integrate_color_with_depth", &Mapper::integrateColorWithDepth)
+       .def("integrate_features", &Mapper::integrateFeatures)
+ 
+       .def("update_esdf", &Mapper::updateEsdf)
+diff --git a/nvblox_torch/nvblox_torch/mapper.py b/nvblox_torch/nvblox_torch/mapper.py
+index 4e6487a..7605b8e 100644
+--- a/nvblox_torch/nvblox_torch/mapper.py
++++ b/nvblox_torch/nvblox_torch/mapper.py
+@@ -124,7 +124,8 @@ class Mapper:
+                         t_w_c: torch.Tensor,
+                         sensor: Sensor,
+                         mask_frame: Optional[torch.Tensor] = None,
+-                        mapper_id: int = 0) -> None:
++                        mapper_id: int = 0,
++                        depth_frame: Optional[torch.Tensor] = None) -> None:
+         """Add a color frame to the mapper.
+ 
+         Unified entry point that works with both Sensor objects and intrinsics tensors.
+@@ -142,6 +143,14 @@ class Mapper:
+         assert 0 <= mapper_id < len(self._voxel_sizes)
+ 
+         check_integrator_inputs(color_frame, t_w_c, 'Color', 3, torch.uint8, 3)
++        if depth_frame is not None:
++            # Depth aligned to the color image (H, W; float32, meters): selects the voxels to
++            # color and handles occlusion instead of sphere tracing the TSDF.
++            assert mask_frame is None, 'mask_frame is not supported with depth_frame'
++            check_integrator_inputs(depth_frame, t_w_c, 'Depth', 2, torch.float32)
++            self._c_mapper.integrate_color_with_depth(color_frame, depth_frame, t_w_c,
++                                                      sensor.get_c_sensor(), mapper_id)
++            return
+         self._c_mapper.integrate_color(color_frame, t_w_c, sensor.get_c_sensor(), mask_frame,
+                                        mapper_id)
+ 
+diff --git a/nvblox_torch/pyproject.toml b/nvblox_torch/pyproject.toml
+index a5c7155..ddad856 100644
+--- a/nvblox_torch/pyproject.toml
++++ b/nvblox_torch/pyproject.toml
+@@ -7,10 +7,9 @@ dynamic = ["version"]
+ dependencies = [
+     "transforms3d>=0.4.2",
+     "imageio>=2.35.0",
+-    "numpy",
+     "open3d",
+     "timm",
+-    "opencv-python",
++    "opencv-python-headless",
+     "einops",
+     "nvtx",
+     "scipy",
+@@ -20,8 +19,7 @@ dependencies = [
+     "torch<=2.9.1",
+     "torchvision==0.*",
+     "matplotlib>=3.7,<3.11",
+-    # Torch 2.3 require numpy 1.X
+-    "numpy>=1.24,<1.27"
++    "numpy>=2"
+ ]
+ 
+ [build-system]

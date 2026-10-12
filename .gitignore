@@ -1,0 +1,5 @@
+output/
+__pycache__/
+*.py[cod]
+recon/orbslam3_py/build/
+recon/orbslam3_py/*.so
