@@ -22,11 +22,11 @@ Hand-held D455 (848x480, projector alternating), 187 s, 19.4 m of camera path, J
 | Depth (FFS, TensorRT fp32 + TF32) | 934 frames, 5.0 Hz; 188 ms each | live |
 | Capture → in the preview map | 263 ms (p90 460) | live |
 | Stop → final mesh (4 m, distance-weighted TSDF) | 3.3 M triangles | 31 s |
-| `run_offline.sh`: TSDF + COLMAP export + FastGS (31k steps) + USD | test views PSNR 25.45, SSIM 0.838, LPIPS 0.272; 364 k Gaussians; `scene.usdc` 169 MB | ~11 min |
+| 3DGS -> USD: TSDF + COLMAP export + FastGS + USD | 364 k Gaussians; `scene.usdc` 169 MB | ~11 min |
 
 ![Final mesh](docs/mesh_views.png)
 
-![3DGS test views](docs/3dgs_test_views.png)
+![Captured vs 3DGS](docs/3dgs_test_views.png)
 
 ## Pipeline
 

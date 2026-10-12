@@ -22,11 +22,11 @@ Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的�
 | 深度（FFS，TensorRT fp32 + TF32） | 934 幀，5.0 Hz；每幀 188 ms | 即時 |
 | 拍到 → 進預覽地圖 | 263 ms（p90 460） | 即時 |
 | Stop → 最終 mesh（4 m、距離加權 TSDF） | 331 萬個三角形 | 31 秒 |
-| `run_offline.sh`：TSDF + 匯出 COLMAP + FastGS（31k 步）+ USD | 測試視角 PSNR 25.45、SSIM 0.838、LPIPS 0.272；36.4 萬個高斯；`scene.usdc` 169 MB | 約 11 分鐘 |
+| 3DGS -> USD：TSDF + 匯出 COLMAP + FastGS + USD | 36.4 萬個高斯；`scene.usdc` 169 MB | 約 11 分鐘 |
 
 ![最終 mesh](docs/mesh_views.png)
 
-![3DGS 測試視角](docs/3dgs_test_views.png)
+![實拍 vs 3DGS](docs/3dgs_test_views.png)
 
 ## 流程
 

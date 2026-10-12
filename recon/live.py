@@ -36,7 +36,7 @@ from nvblox_torch.mapper_params import MapperParams, MeshIntegratorParams, Proje
 from nvblox_torch.projective_integrator_types import ProjectiveIntegratorType
 from nvblox_torch.sensor import Sensor
 
-from ffs import FFS, DisparityToColorDepth
+from ffs import FFS, ROOT, DisparityToColorDepth
 from frames import FloorDepth, fill_untracked, filter_depth, interpolate, intrinsic_matrix
 from live_view import view_process
 from live_workers import track_process
@@ -255,7 +255,7 @@ def main():
             if args.out:
                 out = args.out if n == 0 else f"{args.out}_{n + 1}"
             else:
-                out = os.path.join("output", f"live_{time.strftime('%Y%m%d_%H%M%S')}")
+                out = os.path.join(ROOT, "output", f"live_{time.strftime('%Y%m%d_%H%M%S')}")
             how = run_session(args, out, ui)
             viewer = ui["viewer"]
             if viewer is None or not viewer.is_alive():

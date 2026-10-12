@@ -7,7 +7,8 @@ import torch
 import torch.nn.functional as F
 
 FFS_ROOT = os.path.expanduser("~/Fast-FoundationStereo")
-ENGINE = "output/ffs/ffs_480x864_it8_fp32_tf32.engine"  # recon/export_ffs_trt.py: 848x480 padded to 32
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+ENGINE = os.path.join(ROOT, "output/ffs/ffs_480x864_it8_fp32_tf32.engine")  # export_ffs_trt.py: 848x480 padded to 32
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 
