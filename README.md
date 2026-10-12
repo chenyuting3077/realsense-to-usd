@@ -24,12 +24,13 @@ Isaac Sim needs RTX ray-tracing hardware to render the result, so open the USD o
 
 ## Example: a 3-minute loop around a lab
 
-Hand-held D455 (848x480, projector alternating), 187 s, 19.4 m of camera path, Jetson AGX Thor.
+Hand-held D455 (848x480, projector alternating), 187 s, 19.4 m of camera path, Jetson AGX Thor. Recorded before
+docs/ffs_speed and docs/profile: the live part is faster now (on a replay depth 13.7 Hz, capture → map 122 ms).
 
 | Step | Result | Time |
 |---|---|---|
 | Tracking (ORB-SLAM3 stereo + IMU) | 4811 / 4829 IR pairs tracked; 35 ms each (p90 43) | live |
-| Depth (FFS, TensorRT fp32 + TF32) | 934 frames, 5.0 Hz; 188 ms each | live |
+| Depth (FFS 848x480, TensorRT TF32 then) | 934 frames, 5.0 Hz; 188 ms each | live |
 | Capture → in the preview map | 263 ms (p90 460) | live |
 | Stop → final mesh (4 m, distance-weighted TSDF) | 3.3 M triangles | 31 s |
 | 3DGS -> USD: TSDF + COLMAP export + FastGS + USD | 364 k Gaussians; `scene.usdc` 169 MB | ~11 min |

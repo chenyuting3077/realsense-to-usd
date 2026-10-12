@@ -18,7 +18,7 @@ STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 PRECISIONS = {"tf32": "fp32_tf32", "amp": "amp"}
 
 
-def engine_path(height=384, width=640, max_disp=192, precision="tf32"):
+def engine_path(height=480, width=864, max_disp=192, precision="amp"):
     """export_ffs_trt.py's engine for an input padded to height x width (8 iterations; v3: the cost
     volumes of recon/ffs_volume.py). precision: tf32 (fp32 with TF32) or amp (FFS's own fp16 autocast:
     the networks in fp16, the disparity and its sampling coordinates in fp32)."""
@@ -28,7 +28,7 @@ def engine_path(height=384, width=640, max_disp=192, precision="tf32"):
 
 # 848x480 IR at full size (padded to 864) with FFS's fp16 autocast: 62 ms, the accuracy of TF32 at 848x480
 # (docs/profile)
-ENGINE, SCALE = engine_path(480, 864, precision="amp"), 1.0
+ENGINE, SCALE = engine_path(), 1.0
 
 
 def load_model(valid_iters=8, max_disp=192):

@@ -24,12 +24,13 @@ Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的�
 
 ## 範例：實驗室繞一圈 3 分鐘
 
-手持 D455（848x480，投射器交替），187 秒，相機移動 19.4 m，Jetson AGX Thor。
+手持 D455（848x480，投射器交替），187 秒，相機移動 19.4 m，Jetson AGX Thor。錄於 docs/ffs_speed 與
+docs/profile 之前：現在 live 的部分更快（重播時 depth 13.7 Hz、拍到 → 進地圖 122 ms）。
 
 | 步驟 | 結果 | 時間 |
 |---|---|---|
 | 追蹤（ORB-SLAM3 雙目 + IMU） | 4811 / 4829 組 IR；每組 35 ms（p90 43） | 即時 |
-| 深度（FFS，TensorRT fp32 + TF32） | 934 幀，5.0 Hz；每幀 188 ms | 即時 |
+| 深度（FFS 848x480，當時 TensorRT TF32） | 934 幀，5.0 Hz；每幀 188 ms | 即時 |
 | 拍到 → 進預覽地圖 | 263 ms（p90 460） | 即時 |
 | Stop → 最終 mesh（4 m、距離加權 TSDF） | 331 萬個三角形 | 31 秒 |
 | 3DGS -> USD：TSDF + 匯出 COLMAP + FastGS + USD | 36.4 萬個高斯；`scene.usdc` 169 MB | 約 11 分鐘 |

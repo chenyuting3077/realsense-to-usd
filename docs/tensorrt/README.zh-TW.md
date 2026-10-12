@@ -24,7 +24,7 @@ ETH3D two-view：27 組訓練集、non-occluded 像素、雷射掃描 ground tru
 | A | PyTorch fp16 autocast（原本） | 289.5 ms | 1.0× | 0.187 px | 1.68% | 16 mm | 67.8% | — |
 | B | PyTorch fp32 | 189.1 ms | 1.5× | 0.188 px | 1.68% | 16 mm | 67.8% | 70 mm |
 | C | TensorRT fp16 | 97.1 ms | 3.0× | 0.185 px | 1.70% | 16 mm | 67.8% | 65 mm |
-| **H** | **TensorRT fp32 + TF32（採用）** | **94.0 ms** | **3.1×** | **0.185 px** | **1.70%** | **16 mm** | **67.8%** | **64 mm** |
+| **H** | **TensorRT fp32 + TF32（當時採用）** | **94.0 ms** | **3.1×** | **0.185 px** | **1.70%** | **16 mm** | **67.8%** | **64 mm** |
 | E | TensorRT fp16，4 次迭代 | 81.9 ms | 3.5× | 0.194 px | 1.84% | 16 mm | 67.9% | 578 mm |
 | I | TensorRT fp16，max_disp 128 | 72.4 ms | 4.0× | 0.185 px | 1.75% | 17 mm | 66.1% | 819 mm |
 | D | TensorRT FP8 | 68.0 ms | 4.3× | 0.195 px | 1.93% | 18 mm | 64.3% | 865 mm |
@@ -36,7 +36,8 @@ ETH3D two-view：27 組訓練集、non-occluded 像素、雷射掃描 ground tru
 
 這個 repo 的 848x480 IR（補到 864）在 depth thread 裡每幀 141–149 ms，含轉到 color 相機，
 沒開人物分割（replay `output/live_20261012_160515/rec`）。這個尺寸沒有重新比較 PyTorch 與 TensorRT 的精度。
-main.py 現在把 IR 縮成 0.75 倍（636x360，81 ms）再跑 FFS：[docs/ffs_speed](../ffs_speed/README.zh-TW.md)。
+main.py 之後改把 IR 縮成 0.75 倍再跑 FFS（[docs/ffs_speed](../ffs_speed/README.zh-TW.md)），現在則是 848x480 + FFS 自己的
+fp16 autocast，62 ms、精度和 TF32 一樣（[docs/profile](../profile/README.zh-TW.md)）。
 
 ## 人物分割
 

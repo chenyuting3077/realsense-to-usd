@@ -24,7 +24,7 @@ pairs from a D455 recording, compared with the D455's own depth at 0.3–2.5 m (
 | A | PyTorch fp16 autocast (original) | 289.5 ms | 1.0× | 0.187 px | 1.68% | 16 mm | 67.8% | — |
 | B | PyTorch fp32 | 189.1 ms | 1.5× | 0.188 px | 1.68% | 16 mm | 67.8% | 70 mm |
 | C | TensorRT fp16 | 97.1 ms | 3.0× | 0.185 px | 1.70% | 16 mm | 67.8% | 65 mm |
-| **H** | **TensorRT fp32 + TF32 (used)** | **94.0 ms** | **3.1×** | **0.185 px** | **1.70%** | **16 mm** | **67.8%** | **64 mm** |
+| **H** | **TensorRT fp32 + TF32 (used then)** | **94.0 ms** | **3.1×** | **0.185 px** | **1.70%** | **16 mm** | **67.8%** | **64 mm** |
 | E | TensorRT fp16, 4 iterations | 81.9 ms | 3.5× | 0.194 px | 1.84% | 16 mm | 67.9% | 578 mm |
 | I | TensorRT fp16, max_disp 128 | 72.4 ms | 4.0× | 0.185 px | 1.75% | 17 mm | 66.1% | 819 mm |
 | D | TensorRT FP8 | 68.0 ms | 4.3× | 0.195 px | 1.93% | 18 mm | 64.3% | 865 mm |
@@ -37,7 +37,8 @@ pairs from a D455 recording, compared with the D455's own depth at 0.3–2.5 m (
 
 Here the 848x480 IR (padded to 864) took 141–149 ms a frame in the depth thread, including the warp into the color
 camera, without the person segmentation running (replay of `output/live_20261012_160515/rec`). PyTorch vs. TensorRT
-accuracy was not measured again at this size. main.py now runs FFS on the IR at 0.75x (636x360, 81 ms): [docs/ffs_speed](../ffs_speed/README.md).
+accuracy was not measured again at this size. main.py ran FFS on the IR at 0.75x afterwards ([docs/ffs_speed](../ffs_speed/README.md)) and now at 848x480 with FFS's own
+fp16 autocast, 62 ms at the accuracy of TF32 ([docs/profile](../profile/README.md)).
 
 ## Person segmentation
 
