@@ -4,7 +4,8 @@
 
 FFS limits the live depth rate (the rest of the depth thread adds ~15 ms). Two ways to make it faster, against the setting
 used before (848x480 IR padded to 864, max disparity 192, TensorRT fp32 + TF32, 8 iterations), on the Jetson AGX Thor.
-**main.py now uses 636x360.** Reproduce with [`eval_ffs.py`](eval_ffs.py):
+**main.py used 636x360 from here; now 848x480 with FFS's own fp16 autocast, faster than 636x360 TF32 and as accurate as
+848x480 TF32: [docs/profile](../profile/README.md).** Reproduce with [`eval_ffs.py`](eval_ffs.py):
 
 ```bash
 python -m recon.export_ffs_trt                            # 636x360 padded to 640x384 (the default)

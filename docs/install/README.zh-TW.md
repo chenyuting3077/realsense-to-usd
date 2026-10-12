@@ -71,7 +71,7 @@ ORB-SLAM3、Fast-FoundationStereo、FastGS 都要照這裡的指令放在 `~/`�
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python -m recon.export_ffs_trt   # -> output/ffs/ffs_384x640_it8_fp32_tf32.engine（約 5 分鐘）
+python -m recon.export_ffs_trt   # -> output/ffs/ffs_480x864_it8_v3_amp.engine（約 5 分鐘）
 ```
 
 TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。
@@ -102,5 +102,10 @@ patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中
 ### Jetson
 
 ```bash
-sudo jetson_clocks   # 鎖最高時脈（否則 GPU 在兩次 FFS 之間降頻）；每次開機後要重跑
+sudo jetson_clocks   # GPU 與記憶體鎖最高時脈（否則 GPU 在兩次 FFS 之間降頻）
+# 每次開機後要重跑（或設成 service）
+# CPU 也鎖最高，每次開機自動：JetPack 7.1 的 jetson_clocks 不動 CPU（schedutil，972–2601 MHz），
+# ORB-SLAM3 每幀會是 32 ms 而不是 22 ms（docs/profile）
+sudo cp docs/install/cpu-performance.service /etc/systemd/system/
+sudo systemctl enable --now cpu-performance.service
 ```

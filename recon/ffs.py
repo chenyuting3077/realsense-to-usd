@@ -15,14 +15,20 @@ MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 
 
-def engine_path(height=384, width=640, max_disp=192):
-    """export_ffs_trt.py's engine for an input padded to height x width (8 iterations, fp32 + TF32)."""
+PRECISIONS = {"tf32": "fp32_tf32", "amp": "amp"}
+
+
+def engine_path(height=384, width=640, max_disp=192, precision="tf32"):
+    """export_ffs_trt.py's engine for an input padded to height x width (8 iterations; v3: the cost
+    volumes of recon/ffs_volume.py). precision: tf32 (fp32 with TF32) or amp (FFS's own fp16 autocast:
+    the networks in fp16, the disparity and its sampling coordinates in fp32)."""
     md = "" if max_disp == 192 else f"_md{max_disp}"
-    return os.path.join(ROOT, f"output/ffs/ffs_{height}x{width}_it8{md}_fp32_tf32.engine")
+    return os.path.join(ROOT, f"output/ffs/ffs_{height}x{width}_it8{md}_v3_{PRECISIONS[precision]}.engine")
 
 
-# 848x480 IR at 0.75x: 636x360 padded to 640x384, 81 instead of 142 ms (docs/ffs_speed)
-ENGINE, SCALE = engine_path(), 0.75
+# 848x480 IR at full size (padded to 864) with FFS's fp16 autocast: 62 ms, the accuracy of TF32 at 848x480
+# (docs/profile)
+ENGINE, SCALE = engine_path(480, 864, precision="amp"), 1.0
 
 
 def load_model(valid_iters=8, max_disp=192):
@@ -107,16 +113,19 @@ class DisparityToColorDepth:
                                         torch.arange(st["width"], device=dev, dtype=torch.float32), indexing="ij")
 
     def __call__(self, disp):
-        H, W, u, v, K_ir, K_c = self.H, self.W, self.u, self.v, self.K_ir, self.K_c
+        """Every pixel is computed and the invalid ones scattered to a spare slot: no boolean indexing,
+        which would wait for the GPU (holding the GIL) to learn the count."""
+        H, W, u, v, K_ir, K_c = self.H, self.W, self.u.ravel(), self.v.ravel(), self.K_ir, self.K_c
+        disp = disp.ravel()
         ok = (disp > 0.5) & (u - disp >= 0)  # the match must fall inside the right image
-        z = self.fx_baseline / disp[ok]
-        X = torch.stack([(u[ok] - K_ir[0, 2]) * z / K_ir[0, 0], (v[ok] - K_ir[1, 2]) * z / K_ir[1, 1], z])
+        z = self.fx_baseline / torch.where(ok, disp, 1.0)
+        X = torch.stack([(u - K_ir[0, 2]) * z / K_ir[0, 0], (v - K_ir[1, 2]) * z / K_ir[1, 1], z])
         Y = self.color_from_ir1[:3, :3] @ X + self.color_from_ir1[:3, 3:]
         pu, pv = Y[0] / Y[2] * K_c[0, 0] + K_c[0, 2], Y[1] / Y[2] * K_c[1, 1] + K_c[1, 2]
-        depth = torch.full((H * W,), torch.inf, device=self.dev)
+        depth = torch.full((H * W + 1,), torch.inf, device=self.dev)  # [H * W]: the invalid ones
         for du in (0, 1):
             for dv in (0, 1):
                 x, y = torch.floor(pu).long() + du, torch.floor(pv).long() + dv
-                m = (x >= 0) & (x < W) & (y >= 0) & (y < H) & (Y[2] > 0)
-                depth.scatter_reduce_(0, y[m] * W + x[m], Y[2][m], reduce="amin")
-        return drop_flying_pixels(torch.where(torch.isinf(depth), 0, depth).reshape(H, W))
+                m = ok & (x >= 0) & (x < W) & (y >= 0) & (y < H) & (Y[2] > 0)
+                depth.scatter_reduce_(0, torch.where(m, y * W + x, H * W), Y[2], reduce="amin")
+        return drop_flying_pixels(torch.where(torch.isinf(depth[:-1]), 0, depth[:-1]).reshape(H, W))

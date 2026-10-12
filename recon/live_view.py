@@ -8,6 +8,7 @@ of the USD export.
 cam_q: ("cam", IR image, keypoints Nx3 (x, y, matched), pose or None, track ms, tracking ok or
 "imu" (on the IMU alone), turning deg/s). ui_q (to main.py): "stop", "discard", "new", "usd".
 """
+import os
 import signal
 import threading
 
@@ -19,6 +20,27 @@ DEPTH_RANGE = (0.2, 2.5)  # as the live map
 STATUS_LINES = 9
 STAGES = [("start", "Start"), ("record", "Record"), ("trajectory", "Final trajectory"),
           ("mesh", "Final mesh"), ("save", "Save"), ("done", "Done")]
+
+
+def desktop_display():
+    """{DISPLAY, XAUTHORITY} of this user's desktop session, for a window opened over ssh: from the
+    environment of the user's session processes (gnome-shell first), not a fixed :0 or :1, which
+    changes between boots. {} when there is none."""
+    found = []
+    for pid in os.listdir("/proc"):
+        try:
+            if not pid.isdigit() or os.stat(f"/proc/{pid}").st_uid != os.getuid():
+                continue
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                env = dict(kv.split("=", 1) for kv in f.read().decode(errors="replace").split("\0") if "=" in kv)
+            with open(f"/proc/{pid}/comm") as f:
+                shell = f.read().strip() == "gnome-shell"
+        except OSError:
+            continue
+        if "DISPLAY" in env and "SSH_CONNECTION" not in env:
+            # with XAUTHORITY first (an X11 session's), then gnome-shell's
+            found.append(("XAUTHORITY" not in env, not shell, {k: env[k] for k in ("DISPLAY", "XAUTHORITY") if k in env}))
+    return min(found, key=lambda x: x[:2])[2] if found else {}
 
 
 def draw_camera(img, kps, ok, track_ms, other_map=False, dps=0.0, imu_only=False):

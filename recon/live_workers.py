@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 
 from recon.frames import interpolate
+from recon.prof import span, summary
 
 ORB_ROOT = os.path.expanduser("~/ORB_SLAM3")
 OUTLIER_CM = 5.0  # IR poses this far from the median of their 7 neighbours are interpolated
@@ -426,7 +427,8 @@ def camera_source(pipe, off, on, stop, duration, rec, imu, exposure, alternate):
     i, t_end, t_last = 0, time.perf_counter() + duration if duration else None, -1.0
     try:
         while not stop.is_set() and (t_end is None or time.perf_counter() < t_end):
-            fs = pipe.wait_for_frames(5000)
+            with span("camera/wait"):
+                fs = pipe.wait_for_frames(5000)
             a, b, c = fs.get_infrared_frame(1), fs.get_infrared_frame(2), fs.get_color_frame()
             if not (a and b) or not a.supports_frame_metadata(mode):
                 continue
@@ -445,8 +447,9 @@ def camera_source(pipe, off, on, stop, duration, rec, imu, exposure, alternate):
                     rec.add_off(t_ms, ir1, ir2)
             if projector_on:
                 if c:
-                    yuyv = np.asanyarray(c.get_data()).view(np.uint8).reshape(c.get_height(), c.get_width(), 2)
-                    color = cv2.cvtColor(yuyv, cv2.COLOR_YUV2RGB_YUY2)
+                    with span("camera/yuyv to rgb"):
+                        yuyv = np.asanyarray(c.get_data()).view(np.uint8).reshape(c.get_height(), c.get_width(), 2)
+                        color = cv2.cvtColor(yuyv, cv2.COLOR_YUV2RGB_YUY2)
                     on.put((i, t, wall, ir1, ir2, color))
                     if rec and (alternate or i % 2 == 0):
                         rec.add_on(t_ms, color, ir1, ir2)
@@ -548,7 +551,8 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
         ORB-SLAM3 starts a new map in a frame of its own until it merges the two). only_if_moved:
         only when a frame moved past REFINE_CM / REFINE_DEG from the poses sent so far."""
         nonlocal T_all, version, main_map
-        t, P, maps = slam.trajectory()
+        with span("track/read trajectory"):
+            t, P, maps = slam.trajectory()
         main_map_new = int(np.bincount(maps).argmax()) if len(maps) else slam.state()[2]
         by_us = {int(round(x * 1e6)): T for x, T, m in zip(t, P, maps) if m == main_map_new}
         new = [by_us.get((ns - t0) // 1000) for ns in ir_ns]
@@ -586,11 +590,13 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
         start = time.perf_counter()
         imu_rows = None
         if inertial:  # the IMU samples since the last tracked frame
-            imu_rows = imu.between(t - 33_000_000 if t_prev is None else t_prev, t).copy()
+            with span("track/imu"):
+                imu_rows = imu.between(t - 33_000_000 if t_prev is None else t_prev, t).copy()
             imu_rows[:, 0] = (imu_rows[:, 0] - t0) / 1e9
         t_prev = t
         # microseconds since the first frame: the trajectory's times map back to these exactly
-        ok, T, imu_only, imu_init = slam.track(left, right, (t - t0) // 1000 * 1e-6, imu_rows)
+        with span("track/orbslam3"):
+            ok, T, imu_only, imu_init = slam.track(left, right, (t - t0) // 1000 * 1e-6, imu_rows)
         track_ms = (time.perf_counter() - start) * 1000
         ir_ns.append(t)
         new_state = slam.state()
@@ -609,11 +615,12 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
             rot.update(T=T, t=t)
         if view_q is not None and time.perf_counter() - last_view >= 1 / 15:
             last_view = time.perf_counter()
-            try:
-                view_q.put_nowait(("cam", left, slam.keypoints(), T_all[-1], track_ms,
-                                   "imu" if imu_only else ok, rot["dps"]))
-            except queue.Full:
-                pass
+            with span("track/to window"):
+                try:
+                    view_q.put_nowait(("cam", left, slam.keypoints(), T_all[-1], track_ms,
+                                       "imu" if imu_only else ok, rot["dps"]))
+                except queue.Full:
+                    pass
         if imu_ready and not imu_init:
             # ORB-SLAM3 dropped the map (too little motion after the IMU initialization)
             imu_ready = False
@@ -638,7 +645,8 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
             correct("after the change")
             recheck = None
         elif ok and time.perf_counter() - last_refine >= REFINE_S:
-            correct("refined (local BA)", only_if_moved=True)
+            with span("track/refine"):
+                correct("refined (local BA)", only_if_moved=True)
             last_refine = time.perf_counter()
     if ir_ns:
         correct("final")
@@ -646,4 +654,5 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
     src.join()
     slam.shutdown()
     server.join(60)  # until the depth thread has got the end (None)
+    out_q.put(("prof", summary()))
     out_q.put(("done",))

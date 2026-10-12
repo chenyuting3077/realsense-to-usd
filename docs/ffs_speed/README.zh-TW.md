@@ -4,7 +4,8 @@
 
 即時深度的速度卡在 FFS（depth thread 其他部分約 15 ms）。兩種加速方式，和之前的設定比較
 （848x480 IR 補到 864、max disparity 192、TensorRT fp32 + TF32、8 次迭代），Jetson AGX Thor。
-**main.py 現在用 636x360。** 用 [`eval_ffs.py`](eval_ffs.py) 重現：
+**main.py 從這裡開始用 636x360；現在改用 848x480 + FFS 自己的 fp16 autocast，比 636x360 TF32 快、精度和 848x480 TF32 一樣：
+[docs/profile](../profile/README.zh-TW.md)。** 用 [`eval_ffs.py`](eval_ffs.py) 重現：
 
 ```bash
 python -m recon.export_ffs_trt                            # 636x360 補到 640x384（預設）

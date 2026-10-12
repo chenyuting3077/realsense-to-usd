@@ -11,8 +11,11 @@ import cv2
 import numpy as np
 import open3d as o3d
 import open3d.core as o3c
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 
 from recon.frames import intrinsic_matrix, iter_frames, load_meta
+from recon.prof import span
 
 VOXEL, TRUNC_VOX, DEPTH_MAX = 0.01, 4.0, 4.0
 WEIGHT_REF = 2.0  # observations within this depth (m) weigh 1, farther ones (WEIGHT_REF / z)^2
@@ -52,11 +55,25 @@ def extract_mesh(grid, block_resolution):
     return mesh
 
 
+def piece_size(triangles):
+    """Triangles in the piece of each triangle, pieces joined by shared edges: Open3D's
+    cluster_connected_triangles (the same pieces) takes 6x as long, on one core."""
+    n = len(triangles)
+    e = np.sort(triangles[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1).astype(np.int64)
+    key = e[:, 0] * (int(triangles.max()) + 1) + e[:, 1]
+    order = np.argsort(key, kind="stable")
+    k, t = key[order], order // 3
+    same = k[1:] == k[:-1]  # the same edge in two triangles
+    graph = coo_matrix((np.ones(same.sum(), np.int8), (t[:-1][same], t[1:][same])), shape=(n, n))
+    labels = connected_components(graph, directed=False)[1]
+    return np.bincount(labels)[labels]
+
+
 def clean_mesh(mesh):
     """Merge duplicated vertices, drop pieces under MIN_CLUSTER triangles (stereo noise)."""
     mesh.remove_duplicated_vertices()
-    clusters, counts, _ = mesh.cluster_connected_triangles()
-    mesh.remove_triangles_by_mask(np.asarray(counts)[np.asarray(clusters)] < MIN_CLUSTER)
+    if len(mesh.triangles):
+        mesh.remove_triangles_by_mask(piece_size(np.asarray(mesh.triangles)) < MIN_CLUSTER)
     mesh.remove_unreferenced_vertices()
     return mesh
 
@@ -148,20 +165,22 @@ class WeightedTSDF:
     def integrate(self, depth, color, K, T_wc, depth_scale):
         """depth in units of 1 / depth_scale m, color HxWx3 uint8; numpy or torch."""
         t = self.torch
-        depth_np = depth.cpu().numpy() if t.is_tensor(depth) else depth
-        Tcw = np.linalg.inv(T_wc)
-        coords = self.blocks.compute_unique_block_coordinates(
-            o3d.t.geometry.Image(o3c.Tensor(np.ascontiguousarray(depth_np[..., None]))),
-            o3c.Tensor(K, o3c.float64), o3c.Tensor(Tcw), depth_scale, DEPTH_MAX, TRUNC_VOX)
+        with span("tsdf/blocks"):
+            depth_np = depth.cpu().numpy() if t.is_tensor(depth) else depth
+            Tcw = np.linalg.inv(T_wc)
+            coords = self.blocks.compute_unique_block_coordinates(
+                o3d.t.geometry.Image(o3c.Tensor(np.ascontiguousarray(depth_np[..., None]))),
+                o3c.Tensor(K, o3c.float64), o3c.Tensor(Tcw), depth_scale, DEPTH_MAX, TRUNC_VOX)
         if coords.shape[0] == 0:
             return
         assert self.hashmap.size() + coords.shape[0] <= self.capacity, "TSDF block capacity exceeded"
-        self.hashmap.activate(coords)
-        buf, _ = self.hashmap.find(coords)
-        buf = t.from_numpy(buf.numpy().astype(np.int64)).cuda()
-        self._grow(int(buf.max()) + 1)
-        keys = t.from_numpy(coords.numpy()).cuda()
-        self.keys[buf] = keys
+        with span("tsdf/hash"):
+            self.hashmap.activate(coords)
+            buf, _ = self.hashmap.find(coords)
+            buf = t.from_numpy(buf.numpy().astype(np.int64)).cuda()
+            self._grow(int(buf.max()) + 1)
+            keys = t.from_numpy(coords.numpy()).cuda()
+            self.keys[buf] = keys
         H, W = depth.shape
         _integrate_kernel()[(len(buf), self.RES ** 3 // self.VOXELS_PER_PROGRAM)](
             keys, buf, t.as_tensor(depth, device="cuda").contiguous(), t.as_tensor(color, device="cuda").contiguous(),
@@ -183,7 +202,12 @@ class WeightedTSDF:
         return grid
 
     def mesh(self, grid=None):
-        return clean_mesh(extract_mesh(grid or self.voxel_grid(), self.RES))
+        with span("tsdf/voxel grid"):
+            grid = grid or self.voxel_grid()
+        with span("tsdf/marching cubes"):
+            mesh = extract_mesh(grid, self.RES)
+        with span("tsdf/clean"):
+            return clean_mesh(mesh)
 
 
 def main():

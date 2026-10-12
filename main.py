@@ -2,7 +2,7 @@
 Fast-FoundationStereo depth with people masked out (thread), nvblox TSDF (main). A loop closure or
 another trajectory correction re-integrates every stored frame into a new map in the background,
 swapped in when it has caught up. At the end the final trajectory gives the final mesh
-(recon/reconstruct.py's TSDF). The window shows on the desktop's display (:1) when started over ssh.
+(recon/reconstruct.py's TSDF). Started over ssh, the window shows on the desktop session's display.
 
 Output in -o: mesh_live.ply, live.json (timings), frames/ (color, depth_ffs/ in mm, mask/ (0 on
 people), meta.json, poses.npy: the input of gs/offline.py), rec/ (every frameset, for replay).
@@ -40,9 +40,10 @@ from nvblox_torch.sensor import Sensor
 from gs.offline import estimate
 from recon.ffs import FFS, ROOT, DisparityToColorDepth
 from recon.frames import DEVICE, FloorDepth, fill_untracked, interpolate, intrinsic_matrix
-from recon.live_view import view_process
+from recon.live_view import desktop_display, view_process
 from recon.live_workers import track_process
 from recon.person_mask import ENGINE as SEG_ENGINE, PersonSeg
+from recon.prof import span, summary, times as prof_times
 from recon.reconstruct import WeightedTSDF
 
 VOXEL = 0.01
@@ -75,6 +76,7 @@ class Tracker(threading.Thread):
         self.ir_ns, self.T, self._ns = [], [], np.zeros(0, np.int64)
         self.version, self.finished = 0, False
         self.track_ms, self.lag_ms, self.events, self.skipped, self.notes = [], [], [], 0, []
+        self.stages = {}  # the tracker process's recon.prof summary, sent at the end
         ctx = mp.get_context("spawn")
         self.ctrl_q, self.q, self.req_q, self.frames_q = ctx.Queue(), ctx.Queue(), ctx.Queue(), ctx.Queue()
         self.proc = ctx.Process(target=track_process, daemon=True,
@@ -119,6 +121,8 @@ class Tracker(threading.Thread):
             elif msg[0] == "note":
                 print(f"[tracker] {msg[1]}", flush=True)
                 self.notes.append(msg[1])
+            elif msg[0] == "prof":
+                self.stages = msg[1]
             else:
                 self.finished = True
                 return
@@ -145,7 +149,7 @@ class Tracker(threading.Thread):
 class Depth(threading.Thread):
     """FFS on the newest projector-on frameset -> filtered depth (m) in the color camera, 0 on the
     people PersonSeg finds in the color image (with seg; the keep mask goes along for frames/mask/).
-    The segmentation runs after FFS, not beside it: next to FFS it waits for the GPU anyway."""
+    The segmentation is queued on a stream of its own just before FFS, so the GPU runs it beside FFS."""
 
     def __init__(self, meta, ffs, seg, req_q, in_q, out_q):
         super().__init__(daemon=True)
@@ -153,6 +157,7 @@ class Depth(threading.Thread):
         self.to_color = DisparityToColorDepth(meta, DEVICE)
         self.ffs_ms, self.seg_ms, self.skipped, self.finished = [], [], 0, False
         self.stream = torch.cuda.Stream()  # syncing it does not wait for nvblox
+        self.seg_stream = torch.cuda.Stream()
         z = torch.zeros(meta["stereo"]["height"], meta["stereo"]["width"], dtype=torch.uint8, device=DEVICE)
         with torch.cuda.stream(self.stream):
             self.ffs(z, z)  # warm up
@@ -162,28 +167,43 @@ class Depth(threading.Thread):
 
     def run(self):
         with torch.cuda.stream(self.stream):
-            last = -1
+            last, requested = -1, False
             while True:
-                self.req_q.put(1)
-                item = self.in_q.get()
+                with span("depth/wait frame"):
+                    if not requested:
+                        self.req_q.put(1)
+                    item = self.in_q.get()
+                requested = False
                 if item is None:
                     break
                 i, t_ns, wall, ir1, ir2, color = item
                 self.skipped += i - last - 1
                 last = i
                 t = time.perf_counter()
-                disp = self.ffs(torch.as_tensor(ir1, device=DEVICE), torch.as_tensor(ir2, device=DEVICE))
-                # Wait here, where the GIL is released: the warp's indexing would sync holding it.
-                self.stream.synchronize()
-                depth = self.to_color(disp)
                 color = torch.from_numpy(color).to(DEVICE)
                 keep = None
                 if self.seg is not None:
+                    self.seg_stream.wait_stream(self.stream)  # the color upload
+                    with torch.cuda.stream(self.seg_stream):
+                        keep = self.seg(color)
+                    color.record_stream(self.seg_stream)
+                    keep.record_stream(self.stream)
+                with span("depth/ffs"):
+                    disp = self.ffs(torch.as_tensor(ir1, device=DEVICE), torch.as_tensor(ir2, device=DEVICE))
                     self.stream.synchronize()
+                # The next frameset comes over from the tracker process (~7 ms) during the warp and the
+                # segmentation; asked for any earlier it would be older when FFS gets it.
+                self.req_q.put(1)
+                requested = True
+                with span("depth/to color"):
+                    depth = self.to_color(disp)
+                    self.stream.synchronize()
+                if self.seg is not None:
                     t_seg = time.perf_counter()
-                    keep = self.seg(color)
-                    depth = torch.where(keep, depth, 0)
-                self.stream.synchronize()  # nvblox reads them on its own stream
+                    with span("depth/seg"):
+                        self.stream.wait_stream(self.seg_stream)
+                        depth = torch.where(keep, depth, 0)
+                        self.stream.synchronize()  # nvblox reads them on its own stream
                 now = time.perf_counter()
                 self.ffs_ms.append((now - t) * 1000)
                 if keep is not None:
@@ -207,26 +227,47 @@ def view_map(mapper, tracker, status, frame, mesh=None):
     return ("map", v, f, c, cams.reshape(-1, 3), dict(status, triangles=len(f)), frame)
 
 
-def save_frames(out, meta, stored, poses):
-    """The frames given to the mapper as a frames dir, with their final poses."""
-    masked = stored[0][4] is not None
-    for d in ("color", "depth_ffs") + (("mask",) if masked else ()):
-        os.makedirs(os.path.join(out, d), exist_ok=True)
+class FrameWriter:
+    """The frames given to the mapper as a frames dir: their PNGs written as they come by a
+    low-priority thread pool (all at Stop took ~1 s), meta.json and the final poses at the end."""
 
-    def write(k):
-        _, _, d, c, keep = stored[k]
-        if masked:
-            cv2.imwrite(os.path.join(out, "mask", f"{k:06d}.png"), keep.to(torch.uint8).cpu().numpy() * 255)
-        cv2.imwrite(os.path.join(out, "color", f"{k:06d}.png"), cv2.cvtColor(c.cpu().numpy(), cv2.COLOR_RGB2BGR))
-        mm = torch.clamp(torch.round(d * meta["depth_scale"]), 0, 65535).to(torch.int32).cpu().numpy()
-        cv2.imwrite(os.path.join(out, "depth_ffs", f"{k:06d}.png"), mm.astype(np.uint16))
-    with ThreadPoolExecutor(8) as pool:
-        list(pool.map(write, range(len(stored))))
-    m = dict(meta, frames=[{"timestamp_ms": s[0] / 1e6} for s in stored])
-    m["stereo"] = {k: v for k, v in meta["stereo"].items() if k != "frames"}
-    with open(os.path.join(out, "meta.json"), "w") as f:
-        json.dump(m, f, indent=1)
-    np.save(os.path.join(out, "poses.npy"), poses)
+    def __init__(self, out, meta):
+        self.out, self.meta, self.jobs = out, meta, []
+        for d in ("color", "depth_ffs"):
+            os.makedirs(os.path.join(out, d), exist_ok=True)
+        self.pool = ThreadPoolExecutor(4, initializer=lambda: os.setpriority(
+            os.PRIO_PROCESS, threading.get_native_id(), 10))
+
+    def add(self, item):
+        self.jobs.append(self.pool.submit(self._write, len(self.jobs), item))
+
+    def _png(self, d, k, img):
+        path = os.path.join(self.out, d, f"{k:06d}.png")
+        if not cv2.imwrite(path, img):  # False, not an exception (disk full, ...): close() raises it
+            raise OSError(f"cannot write {path}")
+
+    def _write(self, k, item):
+        _, _, d, c, keep = item
+        if keep is not None:
+            os.makedirs(os.path.join(self.out, "mask"), exist_ok=True)
+            self._png("mask", k, keep.to(torch.uint8).cpu().numpy() * 255)
+        self._png("color", k, cv2.cvtColor(c.cpu().numpy(), cv2.COLOR_RGB2BGR))
+        mm = torch.clamp(torch.round(d * self.meta["depth_scale"]), 0, 65535).to(torch.int32).cpu().numpy()
+        self._png("depth_ffs", k, mm.astype(np.uint16))
+
+    def close(self, stored, poses):
+        """Waits for the PNGs; meta.json and poses.npy of the stored frames."""
+        for j in self.jobs:
+            j.result()
+        self.pool.shutdown()
+        m = dict(self.meta, frames=[{"timestamp_ms": s[0] / 1e6} for s in stored])
+        m["stereo"] = {k: v for k, v in self.meta["stereo"].items() if k != "frames"}
+        with open(os.path.join(self.out, "meta.json"), "w") as f:
+            json.dump(m, f, indent=1)
+        np.save(os.path.join(self.out, "poses.npy"), poses)
+
+    def cancel(self):
+        self.pool.shutdown(cancel_futures=True)
 
 
 def export_usd(out, map_q):
@@ -257,7 +298,10 @@ def main():
     p.add_argument("--no-imu", dest="imu", action="store_false", help="track with the cameras only")
     p.add_argument("--no-view", dest="view", action="store_false", help="no window")
     args = p.parse_args()
-    os.environ.setdefault("DISPLAY", ":1")  # the desktop's display when started over ssh
+    if args.view and "DISPLAY" not in os.environ:  # started over ssh: the window on the desktop
+        os.environ.update(desktop_display())
+        if "DISPLAY" not in os.environ:
+            p.error("no desktop session found for the window: log in on the Thor's screen, or use --no-view")
     if args.frames and not os.path.isdir(os.path.join(args.frames, "ir1_on")):
         p.error(f"{args.frames} is not a rec/ of a live session (no ir1_on/)")
     ctx = mp.get_context("spawn")
@@ -334,6 +378,7 @@ def run_session(args, out, ui):
     if viewer is not None:
         map_q.put(("session", out))
     t_start = time.perf_counter()
+    prof_times.clear()  # this session's stages, before the depth thread adds to them
     tracker.go()
     depth.start()
     print(f"camera {meta['camera']} {meta['serial']}" if camera else f"replaying {args.frames}",
@@ -343,13 +388,17 @@ def run_session(args, out, ui):
         T = tracker.pose(t_ns, table)
         return None if T is None else T @ ir1_from_color
 
-    def integrate(mapper, fl, d, c, T):
-        d = fl.apply(d, T)  # stored frames keep their full depth: the floor may be found later
+    def integrate(mapper, fl, d, c, T, kind="map"):
+        with span(f"{kind}/floor apply"):
+            d = fl.apply(d, T)  # stored frames keep their full depth: the floor may be found later
         Tt = torch.from_numpy(T.astype(np.float32))
-        mapper.add_depth_frame(d, Tt, sensor)
-        mapper.add_color_frame(c, Tt, sensor, depth_frame=d)  # voxels to color from the depth (patch)
+        with span(f"{kind}/nvblox depth"):
+            mapper.add_depth_frame(d, Tt, sensor)
+        with span(f"{kind}/nvblox color"):
+            mapper.add_color_frame(c, Tt, sensor, depth_frame=d)  # voxels to color from the depth (patch)
 
     stored = []  # (time, capture wall time, depth, color, keep mask or None) of every frame given to the mapper
+    writer = FrameWriter(os.path.join(out, "frames"), meta)
     built = 0  # pose version of the active map
     rebuild = None
     stats = {"integrate_ms": [], "latency_ms": [], "rebuilds": []}
@@ -403,18 +452,21 @@ def run_session(args, out, ui):
                 item = None
             if item is not None:
                 t_ns, wall, d, c, _ = item
-                while not tracker.finished and tracker.last_ns() < t_ns:
-                    if not tracker.alive():
-                        raise SystemExit("ORB-SLAM3 process died")
-                    time.sleep(0.001)  # the IR pair after this frame is not tracked yet
+                with span("map/wait pose"):
+                    while not tracker.finished and tracker.last_ns() < t_ns:
+                        if not tracker.alive():
+                            raise SystemExit("ORB-SLAM3 process died")
+                        time.sleep(0.001)  # the IR pair after this frame is not tracked yet
                 T = color_pose(t_ns)
                 t = time.perf_counter()
                 if T is not None:
-                    floor.update(d, T)
+                    with span("map/floor update"):
+                        floor.update(d, T)
                     integrate(active, floor, d, c, T)
                     stats["integrate_ms"].append((time.perf_counter() - t) * 1000)
                     stats["latency_ms"].append((time.perf_counter() - wall) * 1000)
                 stored.append(item)
+                writer.add(item)
             elif busy:
                 if rebuild is None or rebuild["version"] != tracker.version:
                     # Always a new map: nvblox's clear() leaves most blocks of a large map out of later meshes.
@@ -433,7 +485,7 @@ def run_session(args, out, ui):
                     # frames tracked after the correction are appended to its table, already corrected
                     T = color_pose(t_ns, rebuild["table"])
                     if T is not None:
-                        integrate(rebuild["map"], rebuild["floor"], d, c, T)
+                        integrate(rebuild["map"], rebuild["floor"], d, c, T, "rebuild")
                     rebuild["next"] += 1
                 if rebuild["next"] >= len(stored) and frames_q.empty():
                     rebuild["map"].update_color_mesh()
@@ -454,8 +506,10 @@ def run_session(args, out, ui):
             now = time.perf_counter()
             if now - last_mesh >= MESH_EVERY:
                 last_mesh = now
-                active.update_color_mesh()
-                show()
+                with span("map/update mesh"):
+                    active.update_color_mesh()
+                with span("map/show"):
+                    show()
             if now - last_report >= 10:
                 last_report = now
                 print(f"[{now - t_start:5.1f}s] tracked {len(tracker.ir_ns)} ({tracker.skipped} skipped), "
@@ -469,6 +523,7 @@ def run_session(args, out, ui):
                 stopping = True
 
     if discard:
+        writer.cancel()
         tracker.proc.join(30)
         shutil.rmtree(out, ignore_errors=True)
         print(f"discarded {out}", flush=True)
@@ -477,6 +532,8 @@ def run_session(args, out, ui):
     poses = interpolate(to_color, np.array(tracker.ir_ns), [s[0] for s in stored])
     if not any(T is not None for T in poses):
         print("warning: no stored frame was tracked, nothing saved", flush=True)
+        writer.cancel()
+        shutil.rmtree(os.path.join(out, "frames"), ignore_errors=True)
         tracker.proc.join(30)
         if viewer is not None and viewer.is_alive():
             show(done="Nothing tracked, nothing saved")
@@ -486,15 +543,19 @@ def run_session(args, out, ui):
     show(stage="mesh")
     t_mesh = time.perf_counter()
     tsdf = WeightedTSDF()
-    for (_, _, d, c, _), T in zip(stored, poses):
-        tsdf.integrate(d, c, K, T, 1.0)  # depth in meters, on the GPU
-    mesh = tsdf.mesh()
+    with span("final/integrate"):
+        for (_, _, d, c, _), T in zip(stored, poses):
+            tsdf.integrate(d, c, K, T, 1.0)  # depth in meters, on the GPU
+        torch.cuda.synchronize()
+    with span("final/mesh"):
+        mesh = tsdf.mesh()
     del tsdf
     torch.cuda.empty_cache()
     o3d.io.write_triangle_mesh(os.path.join(out, "mesh_live.ply"), mesh)
     t_done = time.perf_counter()
     show(stage="save", mesh=mesh)
-    save_frames(os.path.join(out, "frames"), meta, stored, poses)
+    with span("final/save frames"):
+        writer.close(stored, poses)
 
     def pct(x):
         return {"median": float(np.median(x)), "p90": float(np.percentile(x, 90))} if len(x) else None
@@ -507,13 +568,14 @@ def run_session(args, out, ui):
                   "seg_ms": pct(depth.seg_ms)},
         "integrate_ms": pct(stats["integrate_ms"]), "latency_ms": pct(stats["latency_ms"]),
         "rebuilds": stats["rebuilds"], "final_mesh_s": t_done - t_mesh, "mesh_triangles": len(mesh.triangles),
+        "stages": summary(), "tracker_stages": tracker.stages,
     }
     with open(os.path.join(out, "live.json"), "w") as f:
         json.dump(report, f, indent=1)
     tr, d, lat = report["tracking"], report["depth"], report["latency_ms"]
     print(f"{run_s:.0f} s: tracked {tr['tracked']}/{tr['frames']}, {tr['ms']['median']:.0f} ms/frame; "
           f"depth {d['frames']} frames ({d['hz']:.1f} Hz), FFS {d['ffs_ms']['median']:.0f} ms"
-          + (f" (people {d['seg_ms']['median']:.0f} ms of it); " if d["seg_ms"] else "; ") +
+          + (f" (waiting for the people mask {d['seg_ms']['median']:.1f} ms of it); " if d["seg_ms"] else "; ") +
           f"capture -> map {lat['median'] if lat else 0:.0f} ms; final mesh {len(mesh.triangles)} triangles "
           f"in {t_done - t_mesh:.1f}s -> {out}", flush=True)
     tracker.proc.join(30)  # the camera free for the next session
