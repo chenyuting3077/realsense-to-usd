@@ -22,7 +22,7 @@ conda install -c conda-forge openusd=26.03   # 匯出 USD（PyPI 的 usd-core �
 
 ### nvblox
 
-套用 `patches/nvblox-thor.patch` 後從原始碼編譯（`live.py` 用到 patch 改過的 `add_color_frame`，官方 wheel 不能用）。
+套用 `patches/nvblox-thor.patch` 後從原始碼編譯（`main.py` 用到 patch 改過的 `add_color_frame`，官方 wheel 不能用）。
 x86_64 上把 `CMAKE_CUDA_ARCHITECTURES` 改成自己的 GPU（例如 `89`），`CMAKE_CUDA_COMPILER` 指到 CUDA 13 的 `nvcc`。
 
 ```bash
@@ -38,7 +38,7 @@ cmake --build ~/nvblox/build -j12
 
 `BUILD_RENDERER=0`：renderer 需要 Vulkan SDK，重建用不到。patch 內容：sm_110 的 CUDA 架構轉換、`numpy>=2` / `opencv-python-headless`
 取代原本鎖定的版本、`NVBLOX_FREE_SPACE_VOX`（限制 free space 清除的距離）、`add_color_frame(..., depth_frame)`（用對齊的深度融合顏色）、
-`NVBLOX_STREAM_PRIORITY`（`live.py` 讓融合在 GPU 上排在 FFS 前面）。
+`NVBLOX_STREAM_PRIORITY`（`main.py` 讓融合在 GPU 上排在 FFS 前面）。
 
 ### ORB-SLAM3 與 Python binding
 
@@ -71,7 +71,7 @@ ORB-SLAM3、Fast-FoundationStereo、FastGS 都要照這裡的指令放在 `~/`�
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python recon/export_ffs_trt.py   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine（約 5 分鐘）
+python -m recon.export_ffs_trt   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine（約 5 分鐘）
 ```
 
 TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。
@@ -79,7 +79,7 @@ TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大
 ### 人物分割（TensorRT）
 
 ```bash
-python recon/export_seg_trt.py   # -> output/seg/person_dlv3_r50_480x848_fp16.engine（約 4 分鐘）
+python -m recon.export_seg_trt   # -> output/seg/person_dlv3_r50_480x848_fp16.engine（約 4 分鐘）
 ```
 
 DeepLabV3-ResNet50（torchvision 權重）、fp16：在 depth thread 裡接在 FFS 後面，每幀約 8 ms。沒有這個引擎時

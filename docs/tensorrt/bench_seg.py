@@ -2,7 +2,7 @@
 agreement with DeepLabV3-ResNet50 PyTorch fp32 on every color frame of a session. Builds the
 MobileNetV3 comparison engine into output/seg/ the first time (~4 min).
 
-Usage: python docs/tensorrt/bench_seg.py output/live_room/frames
+Usage: python -m docs.tensorrt.bench_seg output/live_room/frames
 """
 import glob
 import os
@@ -13,10 +13,10 @@ import cv2
 import numpy as np
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "recon"))
-from export_seg_trt import HEIGHT, WIDTH, build_engine  # noqa: E402
-from person_mask import ENGINE, PERSON, normalize  # noqa: E402
-from torchvision.models import segmentation as S  # noqa: E402
+from torchvision.models import segmentation as S
+
+from recon.export_seg_trt import HEIGHT, WIDTH, build_engine
+from recon.person_mask import ENGINE, PERSON, normalize
 
 R50 = (S.deeplabv3_resnet50, S.DeepLabV3_ResNet50_Weights.DEFAULT)
 MBV3 = (S.deeplabv3_mobilenet_v3_large, S.DeepLabV3_MobileNet_V3_Large_Weights.DEFAULT)
@@ -48,8 +48,9 @@ def tensorrt(engine):
     if not os.path.exists(engine):
         onnx_path = engine.replace("_fp16.engine", ".onnx")
         with torch.no_grad():
-            torch.onnx.export(Person(*MBV3).cuda().eval().half(), torch.randn(1, 3, HEIGHT, WIDTH, device="cuda").half(),
-                              onnx_path, opset_version=17, dynamo=False, input_names=["image"], output_names=["person"])
+            x = torch.randn(1, 3, HEIGHT, WIDTH, device="cuda").half()
+            torch.onnx.export(Person(*MBV3).cuda().eval().half(), x, onnx_path, opset_version=17, dynamo=False,
+                              input_names=["image"], output_names=["person"])
         build_engine(onnx_path, engine)
     e = trt.Runtime(trt.Logger(trt.Logger.ERROR)).deserialize_cuda_engine(open(engine, "rb").read())
     ctx = e.create_execution_context()

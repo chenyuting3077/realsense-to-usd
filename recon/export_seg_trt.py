@@ -1,13 +1,13 @@
 """Build the person segmentation TensorRT engine of person_mask.py's PersonSeg (DeepLabV3-ResNet50,
 fp16, 848x480 color images): ~7 ms a frame on Thor, vs ~20 ms in PyTorch fp16.
 
-Usage: python recon/export_seg_trt.py   (~4 min)
+Usage: python -m recon.export_seg_trt   (~4 min)
 """
 import os
 
 import torch
 
-from person_mask import ENGINE, load_model
+from recon.person_mask import ENGINE, load_model
 
 HEIGHT, WIDTH = 480, 848
 

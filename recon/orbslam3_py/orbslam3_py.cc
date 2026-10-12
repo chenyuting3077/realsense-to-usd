@@ -1,4 +1,4 @@
-// Minimal Python binding of ORB-SLAM3 stereo for live use (recon/live.py).
+// Minimal Python binding of ORB-SLAM3 stereo for live use (main.py).
 //
 //   slam = orbslam3_py.Stereo(vocabulary, settings_yaml, inertial=False)
 //   ok, T_w_c, imu_only, imu_ready = slam.track(left, right, t_sec[, imu])

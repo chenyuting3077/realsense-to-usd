@@ -1,7 +1,7 @@
-"""Distance-weighted TSDF (Triton on the GPU) -> mesh: live.py's final mesh, and offline
+"""Distance-weighted TSDF (Triton on the GPU) -> mesh: main.py's final mesh, and offline
 <frames>/ + poses.npy -> <out>/mesh.ply, pointcloud.ply (the 3DGS initialization).
 
-Usage: python recon/reconstruct.py output/live_room/frames output/live_room/recon
+Usage: python -m recon.reconstruct output/live_room/frames output/live_room/recon
 """
 import argparse
 import os
@@ -12,7 +12,7 @@ import numpy as np
 import open3d as o3d
 import open3d.core as o3c
 
-from frames import intrinsic_matrix, iter_frames, load_meta
+from recon.frames import intrinsic_matrix, iter_frames, load_meta
 
 VOXEL, TRUNC_VOX, DEPTH_MAX = 0.01, 4.0, 4.0
 WEIGHT_REF = 2.0  # observations within this depth (m) weigh 1, farther ones (WEIGHT_REF / z)^2
@@ -199,7 +199,7 @@ def main():
     for i, color, depth in iter_frames(args.frames, meta, "depth_ffs"):
         if os.path.isdir(masks):
             depth[cv2.imread(os.path.join(masks, f"{i:06d}.png"), cv2.IMREAD_GRAYSCALE) == 0] = 0
-        tsdf.integrate(depth, color, K, poses[i], meta["depth_scale"])  # filtered when live.py saved it
+        tsdf.integrate(depth, color, K, poses[i], meta["depth_scale"])  # filtered when main.py saved it
     grid = tsdf.voxel_grid()
     mesh = tsdf.mesh(grid)
     mesh.compute_vertex_normals()

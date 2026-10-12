@@ -1,11 +1,11 @@
 """People in the color images (DeepLabV3-ResNet50, COCO/VOC classes) -> keep masks: False on people,
 dilated so the outline and the depth edge around a person go too. The TSDFs skip masked depth and
 FastGS takes no loss there, so people (moving or not) stay out of the mesh and the Gaussians.
-Live: PersonSeg, the TensorRT engine of export_seg_trt.py, in live.py's depth thread. Offline (this
+Live: PersonSeg, the TensorRT engine of export_seg_trt.py, in main.py's depth thread. Offline (this
 script): PyTorch on a session's frames/color/ -> frames/mask/ (255 kept, 0 people), for sessions
 recorded without the engine.
 
-Usage: python recon/person_mask.py output/live_room/frames
+Usage: python -m recon.person_mask output/live_room/frames
 """
 import os
 import sys
@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from frames import iter_frames, load_meta
+from recon.frames import iter_frames, load_meta
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 ENGINE = os.path.join(ROOT, "output/seg/person_dlv3_r50_480x848_fp16.engine")  # export_seg_trt.py
@@ -70,7 +70,7 @@ class PersonSeg:
     def __call__(self, color):
         if tuple(color.shape[:2]) != self.shape:
             raise SystemExit(f"{ENGINE} is for {self.shape[1]}x{self.shape[0]} images, not "
-                             f"{color.shape[1]}x{color.shape[0]}: rebuild it with recon/export_seg_trt.py")
+                             f"{color.shape[1]}x{color.shape[0]}: rebuild it with python -m recon.export_seg_trt")
         x = normalize(color[None]).contiguous()
         self.context.set_tensor_address("image", x.data_ptr())
         self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream)

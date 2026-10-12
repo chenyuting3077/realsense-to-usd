@@ -1,14 +1,14 @@
 """Build the Fast-FoundationStereo TensorRT engine of recon/ffs.py (fp32 with TF32, 8 iterations,
 480x864), through the ONNX-compatible cost volumes of FFS's scripts/make_single_onnx.py.
 
-Usage: python recon/export_ffs_trt.py   (~5 min)
+Usage: python -m recon.export_ffs_trt   (~5 min)
 """
 import os
 import sys
 
 import torch
 
-from ffs import ENGINE, FFS_ROOT, load_model
+from recon.ffs import ENGINE, FFS_ROOT, load_model
 
 HEIGHT, WIDTH = 480, 864
 

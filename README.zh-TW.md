@@ -4,9 +4,9 @@
 
 手持 Intel RealSense D455 → 即時 3D 重建 → 3D Gaussian Splatting → 給 NVIDIA Isaac Sim 的 USD。
 
-- **即時**（`run_live.sh`）：ORB-SLAM3 雙目 + IMU 位姿、Fast-FoundationStereo 深度（TensorRT）、nvblox TSDF 預覽同時跑，
+- **即時**（`python main.py`）：ORB-SLAM3 雙目 + IMU 位姿、Fast-FoundationStereo 深度（TensorRT）、nvblox TSDF 預覽同時跑，
   視窗顯示地圖、追蹤中的影像、深度與狀態。按 Stop 後用存下的所有幀建距離加權的 TSDF mesh。
-- **離線**（`run_offline.sh`）：這段錄影的幀（遮掉人：即時或在這裡做）→ TSDF mesh → FastGS 3DGS → `scene.usdc`
+- **離線**（`python -m gs.offline`）：這段錄影的幀（遮掉人：即時或在這裡做）→ TSDF mesh → FastGS 3DGS → `scene.usdc`
   （Z-up、公尺、已水平；高斯負責顯示，減面後的 mesh 當靜態碰撞體）。
 
 ## 測試環境
@@ -49,7 +49,7 @@ D455 ──► 追蹤 process：投射器關的 IR ──► ORB-SLAM3 雙目（
 Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（深度 ≤ 4 m）──► mesh_live.ply
      └─► frames/（color + FFS 深度 + 人物 mask + 位姿）、rec/（每組 frameset：color、IR、IMU）
 
-3DGS -> USD（視窗）或 run_offline.sh：frames/ ──►（人物 mask，若即時沒做）──► TSDF + 點雲（不含人）
+3DGS -> USD（視窗）或 gs/offline.py：frames/ ──►（人物 mask，若即時沒做）──► TSDF + 點雲（不含人）
     ──► COLMAP text + mask ──► FastGS（人的像素不算 loss）──► scene.usdc
 ```
 
@@ -62,8 +62,8 @@ Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（�
 
 ```bash
 conda activate realsense-to-usd
-./run_live.sh -o output/live_room   # 按視窗的 Stop 或 Ctrl+C 結束
-./run_offline.sh output/live_room   # -> scene.usdc，或按視窗的 3DGS -> USD
+python main.py -o output/live_room       # 按視窗的 Stop 或 Ctrl+C 結束
+python -m gs.offline output/live_room  # -> scene.usdc，或按視窗的 3DGS -> USD
 ```
 
 開始時先拿穩相機 1 秒（用 IMU 轉正），再開始移動。D455 要接 USB 3。

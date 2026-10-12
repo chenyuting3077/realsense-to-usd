@@ -1,4 +1,4 @@
-"""Processes of recon/live.py. nvblox and Open3D hold the GIL for tens of ms, so ORB-SLAM3 in a
+"""Processes of main.py. nvblox and Open3D hold the GIL for tens of ms, so ORB-SLAM3 in a
 thread of the mapper would fall behind and lose track; the frame source with tracking
 (track_process) and the window (live_view.py) run in their own processes and use queues.
 Child processes ignore SIGINT: Ctrl+C reaches the main process, which asks the source to stop.
@@ -13,9 +13,10 @@ import tempfile
 import threading
 import time
 
+import cv2
 import numpy as np
 
-from frames import interpolate
+from recon.frames import interpolate
 
 ORB_ROOT = os.path.expanduser("~/ORB_SLAM3")
 OUTLIER_CM = 5.0  # IR poses this far from the median of their 7 neighbours are interpolated
@@ -326,7 +327,7 @@ def open_camera(projector):
     pipe, cfg = rs.pipeline(), rs.config()
     for i in (1, 2):
         cfg.enable_stream(rs.stream.infrared, i, c["width"], c["height"], rs.format.y8, c["fps"])
-    cfg.enable_stream(rs.stream.color, c["width"], c["height"], rs.format.rgb8, c["fps"])
+    cfg.enable_stream(rs.stream.color, c["width"], c["height"], rs.format.yuyv, c["fps"])
     profile = pipe.start(cfg)
     dev = profile.get_device()
     stereo = dev.first_depth_sensor()
@@ -445,7 +446,8 @@ def camera_source(pipe, off, on, stop, duration, rec, imu, exposure, alternate):
                     rec.add_off(t_ms, ir1, ir2)
             if projector_on:
                 if c:
-                    color = np.asanyarray(c.get_data()).copy()
+                    yuyv = np.asanyarray(c.get_data()).view(np.uint8).reshape(c.get_height(), c.get_width(), 2)
+                    color = cv2.cvtColor(yuyv, cv2.COLOR_YUV2RGB_YUY2)
                     on.put((i, t, wall, ir1, ir2, color))
                     if rec and (alternate or i % 2 == 0):
                         rec.add_on(t_ms, color, ir1, ir2)
@@ -479,7 +481,7 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "orbslam3_py"))
     import orbslam3_py
-    from frames import load_meta
+    from recon.frames import load_meta
 
     pipe = imu = None
     if source[0] == "camera":

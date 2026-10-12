@@ -4,9 +4,9 @@
 
 Hand-held Intel RealSense D455 → live 3D reconstruction → 3D Gaussian Splatting → a USD stage for NVIDIA Isaac Sim.
 
-- **Live** (`run_live.sh`): ORB-SLAM3 stereo + IMU poses, Fast-FoundationStereo depth (TensorRT) and an nvblox TSDF preview, all at once,
+- **Live** (`python main.py`): ORB-SLAM3 stereo + IMU poses, Fast-FoundationStereo depth (TensorRT) and an nvblox TSDF preview, all at once,
   in a window with the map, the tracked image, depth and status. On Stop, a distance-weighted TSDF mesh is built from every stored frame.
-- **Offline** (`run_offline.sh`): the session's frames (people masked out, live or here) → TSDF mesh → FastGS 3DGS → `scene.usdc`
+- **Offline** (`python -m gs.offline`): the session's frames (people masked out, live or here) → TSDF mesh → FastGS 3DGS → `scene.usdc`
   (Z-up, meters, leveled; Gaussians for display, the decimated mesh as a static collider).
 
 ## Tested environment
@@ -49,7 +49,7 @@ D455 ──► tracker process: projector-off IR pair ──► ORB-SLAM3 stereo
 Stop ──► final trajectory ──► distance-weighted TSDF of every stored frame (depth ≤ 4 m) ──► mesh_live.ply
      └─► frames/ (color + FFS depth + person masks + poses), rec/ (every frameset: color, IR, IMU)
 
-3DGS -> USD (window) or run_offline.sh: frames/ ──► (person masks, if not made live) ──► TSDF + point cloud (no people)
+3DGS -> USD (window) or gs/offline.py: frames/ ──► (person masks, if not made live) ──► TSDF + point cloud (no people)
     ──► COLMAP text + masks ──► FastGS (no loss on people) ──► scene.usdc
 ```
 
@@ -62,8 +62,8 @@ person segmentation, FastGS. Speed and accuracy before and after TensorRT: [docs
 
 ```bash
 conda activate realsense-to-usd
-./run_live.sh -o output/live_room   # Stop in the window or Ctrl+C to end
-./run_offline.sh output/live_room   # -> scene.usdc, or 3DGS -> USD in the window
+python main.py -o output/live_room       # Stop in the window or Ctrl+C to end
+python -m gs.offline output/live_room  # -> scene.usdc, or 3DGS -> USD in the window
 ```
 
 Hold the camera still for a second at the start (leveling with the IMU), then move it. Keep the D455 on USB 3.

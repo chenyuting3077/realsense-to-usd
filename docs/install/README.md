@@ -22,7 +22,7 @@ conda install -c conda-forge openusd=26.03   # USD export (PyPI usd-core has no 
 
 ### nvblox
 
-Built from source with `patches/nvblox-thor.patch` (`live.py` uses the patched `add_color_frame`, so the release wheel does not work).
+Built from source with `patches/nvblox-thor.patch` (`main.py` uses the patched `add_color_frame`, so the release wheel does not work).
 On x86_64 set `CMAKE_CUDA_ARCHITECTURES` to your GPU (e.g. `89`) and `CMAKE_CUDA_COMPILER` to your CUDA 13 `nvcc`.
 
 ```bash
@@ -38,7 +38,7 @@ cmake --build ~/nvblox/build -j12
 
 `BUILD_RENDERER=0`: the renderer needs the Vulkan SDK and is not used. The patch: correct CUDA architecture for sm_110, `numpy>=2` / `opencv-python-headless` instead of the pinned versions,
 `NVBLOX_FREE_SPACE_VOX` (limit how far free space is cleared), `add_color_frame(..., depth_frame)` (color fused with the aligned depth),
-`NVBLOX_STREAM_PRIORITY` (`live.py` runs integration ahead of FFS on the GPU).
+`NVBLOX_STREAM_PRIORITY` (`main.py` runs integration ahead of FFS on the GPU).
 
 ### ORB-SLAM3 and the Python binding
 
@@ -71,7 +71,7 @@ ORB-SLAM3, Fast-FoundationStereo and FastGS are expected in `~/`, as cloned here
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python recon/export_ffs_trt.py   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine (~5 min)
+python -m recon.export_ffs_trt   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine (~5 min)
 ```
 
 TensorRT is pip-installed into the env, leaving a system TensorRT alone. An engine is tied to its input size and TensorRT version.
@@ -79,7 +79,7 @@ TensorRT is pip-installed into the env, leaving a system TensorRT alone. An engi
 ### Person segmentation (TensorRT)
 
 ```bash
-python recon/export_seg_trt.py   # -> output/seg/person_dlv3_r50_480x848_fp16.engine (~4 min)
+python -m recon.export_seg_trt   # -> output/seg/person_dlv3_r50_480x848_fp16.engine (~4 min)
 ```
 
 DeepLabV3-ResNet50 (torchvision weights), fp16: ~8 ms a frame after FFS in the depth thread. Without the

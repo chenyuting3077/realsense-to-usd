@@ -2,7 +2,7 @@
 <out>/images/, <out>/sparse/0/{cameras,images,points3D}.txt, and <out>/masks/ (person_mask.py's, no
 loss where 0 in the patched FastGS) when frames/mask/ exists.
 
-Usage: python gs/export_colmap.py <frames> <pointcloud.ply> <out>
+Usage: python -m gs.export_colmap <frames> <pointcloud.ply> <out>
 """
 import os
 import shutil
@@ -11,8 +11,7 @@ import sys
 import numpy as np
 import open3d as o3d
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "recon"))
-from frames import intrinsic_matrix, load_meta
+from recon.frames import intrinsic_matrix, load_meta
 
 MAX_POINTS = 300_000
 

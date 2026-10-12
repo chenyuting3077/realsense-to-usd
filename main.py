@@ -1,15 +1,16 @@
 """Live reconstruction from a D455 (or a replayed rec/): ORB-SLAM3 stereo + IMU poses (own process),
-Fast-FoundationStereo depth with people masked out (thread), nvblox TSDF (main). A loop closure or another trajectory
-correction re-integrates every stored frame into a new map in the background, swapped in when it
-has caught up. At the end the final trajectory gives the final mesh (reconstruct.py's TSDF).
+Fast-FoundationStereo depth with people masked out (thread), nvblox TSDF (main). A loop closure or
+another trajectory correction re-integrates every stored frame into a new map in the background,
+swapped in when it has caught up. At the end the final trajectory gives the final mesh
+(recon/reconstruct.py's TSDF). The window shows on the desktop's display (:1) when started over ssh.
 
 Output in -o: mesh_live.ply, live.json (timings), frames/ (color, depth_ffs/ in mm, mask/ (0 on
 people), meta.json, poses.npy: the input of gs/offline.py), rec/ (every frameset, for replay).
 In the window: Stop ends a session, New recording starts the next (-o gets _2, _3, ...),
 Discard & restart throws the running one away, 3DGS -> USD runs gs/offline.py on the last one.
 
-Usage: python recon/live.py [-o output/live_room] [--duration 120]
-       python recon/live.py output/live_room/rec      # replay
+Usage: python main.py [-o output/live_room] [--duration 120]    (options: python main.py -h)
+       python main.py output/live_room/rec      # replay
 """
 import argparse
 import gc
@@ -36,20 +37,18 @@ from nvblox_torch.mapper_params import MapperParams, MeshIntegratorParams, Proje
 from nvblox_torch.projective_integrator_types import ProjectiveIntegratorType
 from nvblox_torch.sensor import Sensor
 
-from ffs import FFS, ROOT, DisparityToColorDepth
-from frames import DEVICE, FloorDepth, fill_untracked, interpolate, intrinsic_matrix
-from live_view import view_process
-from live_workers import track_process
-from person_mask import ENGINE as SEG_ENGINE, PersonSeg
-from reconstruct import WeightedTSDF
+from gs.offline import estimate
+from recon.ffs import FFS, ROOT, DisparityToColorDepth
+from recon.frames import DEVICE, FloorDepth, fill_untracked, interpolate, intrinsic_matrix
+from recon.live_view import view_process
+from recon.live_workers import track_process
+from recon.person_mask import ENGINE as SEG_ENGINE, PersonSeg
+from recon.reconstruct import WeightedTSDF
 
 VOXEL = 0.01
 DEPTH_MAX, FLOOR_DEPTH_MAX = 2.5, 4.0  # the live map; on the floor depth is kept farther (FloorDepth)
 REBUILD_CHUNK = 8  # stored frames re-integrated between two checks for a live frame
 MESH_EVERY = 1.0  # s between mesh updates
-OFFLINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gs", "offline.py")
-sys.path.insert(0, os.path.dirname(OFFLINE))
-from offline import estimate  # noqa: E402
 
 
 def make_mapper():
@@ -232,7 +231,7 @@ def save_frames(out, meta, stored, poses):
 
 def export_usd(out, map_q):
     """gs/offline.py on a session, its progress lines to the window."""
-    p = subprocess.Popen([sys.executable, OFFLINE, out], stdout=subprocess.PIPE, text=True)
+    p = subprocess.Popen([sys.executable, "-m", "gs.offline", out], cwd=ROOT, stdout=subprocess.PIPE, text=True)
     for line in p.stdout:
         if line.startswith("progress "):
             _, frac, left, text = line.rstrip("\n").split(" ", 3)
@@ -258,7 +257,7 @@ def main():
     p.add_argument("--no-imu", dest="imu", action="store_false", help="track with the cameras only")
     p.add_argument("--no-view", dest="view", action="store_false", help="no window")
     args = p.parse_args()
-    args.view = args.view and bool(os.environ.get("DISPLAY"))
+    os.environ.setdefault("DISPLAY", ":1")  # the desktop's display when started over ssh
     if args.frames and not os.path.isdir(os.path.join(args.frames, "ir1_on")):
         p.error(f"{args.frames} is not a rec/ of a live session (no ir1_on/)")
     ctx = mp.get_context("spawn")
@@ -319,7 +318,7 @@ def run_session(args, out, ui):
             ui["seg"] = PersonSeg()
         else:
             ui["seg"] = False
-            print(f"{SEG_ENGINE} not found (recon/export_seg_trt.py): people stay in the live map, "
+            print(f"{SEG_ENGINE} not found (python -m recon.export_seg_trt): people stay in the live map, "
                   "gs/offline.py masks them", flush=True)
     ir1_from_color = np.array(st["ir1_from_color"])
     K = intrinsic_matrix(meta)

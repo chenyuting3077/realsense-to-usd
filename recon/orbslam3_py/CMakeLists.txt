@@ -1,4 +1,4 @@
-# Python binding of ORB-SLAM3 stereo for recon/live.py, built against an ORB-SLAM3 tree with
+# Python binding of ORB-SLAM3 stereo for main.py, built against an ORB-SLAM3 tree with
 # patches/orbslam3-thor.patch applied:
 #   cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DORB_SLAM3_ROOT=$HOME/ORB_SLAM3 \
 #         -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")

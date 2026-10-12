@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from frames import intrinsic_matrix
+from recon.frames import intrinsic_matrix
 
 FFS_ROOT = os.path.expanduser("~/Fast-FoundationStereo")
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -34,7 +34,7 @@ class FFS:
     def __init__(self, engine=ENGINE):
         import tensorrt as trt
         if not os.path.exists(engine):
-            raise SystemExit(f"{engine} not found: build it with recon/export_ffs_trt.py")
+            raise SystemExit(f"{engine} not found: build it with python -m recon.export_ffs_trt")
         with open(engine, "rb") as f:
             self.engine = trt.Runtime(trt.Logger(trt.Logger.WARNING)).deserialize_cuda_engine(f.read())
         if self.engine is None:

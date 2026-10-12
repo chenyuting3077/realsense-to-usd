@@ -44,7 +44,7 @@ PyTorch vs. TensorRT accuracy was not measured again at this size.
 `live_20261012_160515`: 148 color frames at 848x480, 131 with people. There is no ground truth: accuracy here is
 **agreement with DeepLabV3-ResNet50 in PyTorch fp32**, which shows whether a faster setting changes the output, not
 whether the model finds every person. Latency is one frame (normalization + model + person class), mean of 100 after 10 warm-up calls.
-Reproduce with [`bench_seg.py`](bench_seg.py): `python docs/tensorrt/bench_seg.py output/live_20261012_160515/frames`.
+Reproduce with [`bench_seg.py`](bench_seg.py): `python -m docs.tensorrt.bench_seg output/live_20261012_160515/frames`.
 
 | | Latency | IoU vs. reference | Pixels differing | Reference person pixels missed | Frames with people |
 |---|---:|---:|---:|---:|---:|

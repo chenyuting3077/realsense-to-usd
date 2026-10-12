@@ -1,4 +1,4 @@
-"""Window of recon/live.py (own process): the map (nvblox mesh, trajectory, current camera; Follow /
+"""Window of main.py (own process): the map (nvblox mesh, trajectory, current camera; Follow /
 Free / Camera views), the tracked IR image with its ORB features, the FFS depth over color, status,
 and the session buttons.
 
@@ -6,7 +6,7 @@ map_q: ("session", out dir), ("reset",), ("map", vertices, triangles, colors, ca
 status, (color, depth) or None), ("estimate", seconds) and ("progress", 0..1, text, finished)
 of the USD export.
 cam_q: ("cam", IR image, keypoints Nx3 (x, y, matched), pose or None, track ms, tracking ok or
-"imu" (on the IMU alone), turning deg/s). ui_q (to live.py): "stop", "discard", "new", "usd".
+"imu" (on the IMU alone), turning deg/s). ui_q (to main.py): "stop", "discard", "new", "usd".
 """
 import signal
 import threading

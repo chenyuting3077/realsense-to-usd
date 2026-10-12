@@ -1,9 +1,9 @@
-"""A live session -> <session>/scene.usdc: person masks (unless live.py made them), TSDF mesh + point
+"""A live session -> <session>/scene.usdc: person masks (unless main.py made them), TSDF mesh + point
 cloud (people left out), COLMAP dataset with the known poses, FastGS 3DGS (no loss on people), USD.
-Prints "progress <0..1> <seconds left> <step>" lines (read by live.py's window); each run's step
+Prints "progress <0..1> <seconds left> <step>" lines (read by main.py's window); each run's step
 times go to output/offline_times.jsonl, which the estimates come from.
 
-Usage: python gs/offline.py output/live_room
+Usage: python -m gs.offline output/live_room
 """
 import json
 import os
@@ -89,12 +89,12 @@ def main():
     if not os.path.exists(os.path.join(frames, "poses.npy")):
         raise SystemExit(f"{frames}/poses.npy not found: not a live session?")
     n, iters = session_size(frames)
-    masked = os.path.isdir(os.path.join(frames, "mask"))  # by live.py's depth thread
+    masked = os.path.isdir(os.path.join(frames, "mask"))  # by main.py's depth thread
     progress = Progress(step_estimates(n, iters, masked))
-    t = [0 if masked else run(progress, 0, [py, os.path.join(ROOT, "recon/person_mask.py"), frames])]
-    t.append(run(progress, 1, [py, os.path.join(ROOT, "recon/reconstruct.py"), frames, os.path.join(s, "recon")]))
-    t.append(run(progress, 2, [py, os.path.join(ROOT, "gs/export_colmap.py"), frames,
-                               os.path.join(s, "recon/pointcloud.ply"), os.path.join(s, "colmap")]))
+    t = [0 if masked else run(progress, 0, [py, "-m", "recon.person_mask", frames], cwd=ROOT)]
+    t.append(run(progress, 1, [py, "-m", "recon.reconstruct", frames, os.path.join(s, "recon")], cwd=ROOT))
+    t.append(run(progress, 2, [py, "-m", "gs.export_colmap", frames,
+                               os.path.join(s, "recon/pointcloud.ply"), os.path.join(s, "colmap")], cwd=ROOT))
     # Densify for the first half, at most to 15k: FastGS prunes Gaussians below 0.1 opacity every 3k
     # steps from 15k, and an opacity reset (every 3k while densifying) on such a step removes them all.
     t.append(run(progress, 3, [
@@ -103,9 +103,9 @@ def main():
         "--grad_abs_thresh", "0.0008", "--iterations", str(iters), "--position_lr_max_steps", str(iters),
         "--densify_until_iter", str(min(iters // 2, 15000)), "--save_iterations", str(iters)],
         cwd=FASTGS, env=dict(os.environ, PYTHONPATH=FASTGS)))
-    t.append(run(progress, 4, [py, os.path.join(ROOT, "gs/export_usd.py"), os.path.join(s, "recon/mesh.ply"),
+    t.append(run(progress, 4, [py, "-m", "gs.export_usd", os.path.join(s, "recon/mesh.ply"),
                                os.path.join(s, f"fastgs/point_cloud/iteration_{iters}/point_cloud.ply"),
-                               os.path.join(frames, "poses.npy"), os.path.join(s, "scene.usdc")]))
+                               os.path.join(frames, "poses.npy"), os.path.join(s, "scene.usdc")], cwd=ROOT))
     os.makedirs(os.path.dirname(HISTORY), exist_ok=True)
     with open(HISTORY, "a") as f:
         row = {"session": s, "frames": n, "iters": iters, "total_s": round(sum(t)), "tsdf": t[1] / n,

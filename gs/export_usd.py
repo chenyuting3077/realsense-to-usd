@@ -6,7 +6,7 @@
       Gaussians     UsdVol.ParticleField3DGaussianSplat (OpenUSD 26.03), SH degree 3
   /PhysicsScene     gravity -Z; outside the default prim, so referencing the asset leaves it out
 
-Usage: python gs/export_usd.py <mesh.ply> <3dgs point_cloud.ply> <poses.npy> <out.usdc>
+Usage: python -m gs.export_usd <mesh.ply> <3dgs point_cloud.ply> <poses.npy> <out.usdc>
 """
 import sys
 

@@ -42,7 +42,7 @@ ETH3D two-view：27 組訓練集、non-occluded 像素、雷射掃描 ground tru
 `live_20261012_160515`：148 張 848x480 的 color 影像，131 張有人。沒有 ground truth：這裡的精度是
 **和 PyTorch fp32 的 DeepLabV3-ResNet50 一致的程度**，看得出加速有沒有改變輸出，看不出模型有沒有抓到每個人。
 延遲是一幀（正規化 + 模型 + 取 person 類別），熱機 10 次後 100 次的平均。
-重現（[`bench_seg.py`](bench_seg.py)）：`python docs/tensorrt/bench_seg.py output/live_20261012_160515/frames`。
+重現（[`bench_seg.py`](bench_seg.py)）：`python -m docs.tensorrt.bench_seg output/live_20261012_160515/frames`。
 
 | | 延遲 | 和參考的 IoU | 不同的像素 | 參考的人像素漏掉 | 有人的幀 |
 |---|---:|---:|---:|---:|---:|
