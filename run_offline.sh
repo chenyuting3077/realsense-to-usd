@@ -3,5 +3,5 @@
 #   ./run_offline.sh output/live_room
 set -eo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <session dir>" >&2; exit 1; }
-[[ ${CONDA_DEFAULT_ENV:-base} != base ]] || { echo "conda activate the env first (docs/INSTALL.md)" >&2; exit 1; }
+[[ ${CONDA_DEFAULT_ENV:-base} != base ]] || { echo "conda activate the env first (docs/install)" >&2; exit 1; }
 exec python "$(dirname "$0")/gs/offline.py" "$1"

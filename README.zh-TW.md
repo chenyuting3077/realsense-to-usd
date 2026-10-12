@@ -6,7 +6,7 @@
 
 - **即時**（`run_live.sh`）：ORB-SLAM3 雙目 + IMU 位姿、Fast-FoundationStereo 深度（TensorRT）、nvblox TSDF 預覽同時跑，
   視窗顯示地圖、追蹤中的影像、深度與狀態。按 Stop 後用存下的所有幀建距離加權的 TSDF mesh。
-- **離線**（`run_offline.sh`）：這段錄影的幀 → TSDF mesh → FastGS 3DGS → `scene.usdc`
+- **離線**（`run_offline.sh`）：這段錄影的幀（遮掉人：即時或在這裡做）→ TSDF mesh → FastGS 3DGS → `scene.usdc`
   （Z-up、公尺、已水平；高斯負責顯示，減面後的 mesh 當靜態碰撞體）。
 
 ## 測試環境
@@ -34,9 +34,9 @@ Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的�
 | Stop → 最終 mesh（4 m、距離加權 TSDF） | 331 萬個三角形 | 31 秒 |
 | 3DGS -> USD：TSDF + 匯出 COLMAP + FastGS + USD | 36.4 萬個高斯；`scene.usdc` 169 MB | 約 11 分鐘 |
 
-![最終 mesh](docs/mesh_views.png)
+![最終 mesh](docs/lab_loop/mesh_views.png)
 
-![實拍 vs 3DGS](docs/3dgs_test_views.png)
+![實拍 vs 3DGS](docs/lab_loop/3dgs_test_views.png)
 
 ## 流程
 
@@ -44,17 +44,19 @@ Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的�
 D455 ──► 追蹤 process：投射器關的 IR ──► ORB-SLAM3 雙目（+ IMU），30 Hz
      │                                       │ 位姿（迴環 → 用修正後的軌跡重建地圖）
      └─► 深度 thread：最新一組投射器開的 IR ──► FFS（TensorRT）──► 對齊到 color 的深度
-                                             │
+                         遮掉人（DeepLabV3，TensorRT）──┤
                      地圖：nvblox TSDF 預覽（深度 ≤ 2.5 m）──► 視窗
 Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（深度 ≤ 4 m）──► mesh_live.ply
-     └─► frames/（color + FFS 深度 + 位姿）、rec/（每組 frameset：color、IR、IMU）
+     └─► frames/（color + FFS 深度 + 人物 mask + 位姿）、rec/（每組 frameset：color、IR、IMU）
 
-3DGS -> USD（視窗）或 run_offline.sh：frames/ ──► TSDF + 點雲 ──► COLMAP text ──► FastGS ──► scene.usdc
+3DGS -> USD（視窗）或 run_offline.sh：frames/ ──►（人物 mask，若即時沒做）──► TSDF + 點雲（不含人）
+    ──► COLMAP text + mask ──► FastGS（人的像素不算 loss）──► scene.usdc
 ```
 
 ## 安裝
 
-見 [INSTALL.zh-TW.md](docs/INSTALL.zh-TW.md)：conda 環境、nvblox、ORB-SLAM3 與 Python binding、Fast-FoundationStereo + TensorRT、FastGS。
+見 [docs/install](docs/install/README.zh-TW.md)：conda 環境、nvblox、ORB-SLAM3 與 Python binding、Fast-FoundationStereo + TensorRT、
+人物分割、FastGS。TensorRT 加速前後的速度與精度：[docs/tensorrt](docs/tensorrt/README.zh-TW.md)。
 
 ## 使用
 

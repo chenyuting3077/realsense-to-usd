@@ -1,5 +1,6 @@
 """frames/ + poses.npy + the TSDF point cloud -> a COLMAP text dataset for 3DGS (known poses, no SfM):
-<out>/images/, <out>/sparse/0/{cameras,images,points3D}.txt.
+<out>/images/, <out>/sparse/0/{cameras,images,points3D}.txt, and <out>/masks/ (person_mask.py's, no
+loss where 0 in the patched FastGS) when frames/mask/ exists.
 
 Usage: python gs/export_colmap.py <frames> <pointcloud.ply> <out>
 """
@@ -31,6 +32,9 @@ def main():
     sparse = os.path.join(out, "sparse", "0")
     os.makedirs(sparse, exist_ok=True)
     shutil.copytree(os.path.join(frames, "color"), os.path.join(out, "images"), dirs_exist_ok=True)
+    shutil.rmtree(os.path.join(out, "masks"), ignore_errors=True)
+    if os.path.isdir(os.path.join(frames, "mask")):
+        shutil.copytree(os.path.join(frames, "mask"), os.path.join(out, "masks"))
     meta, poses = load_meta(frames), np.load(os.path.join(frames, "poses.npy"))
     K = intrinsic_matrix(meta)
     with open(os.path.join(sparse, "cameras.txt"), "w") as f:

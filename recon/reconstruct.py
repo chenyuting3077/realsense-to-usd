@@ -7,6 +7,7 @@ import argparse
 import os
 import sysconfig
 
+import cv2
 import numpy as np
 import open3d as o3d
 import open3d.core as o3c
@@ -194,7 +195,10 @@ def main():
     meta = load_meta(args.frames)
     K, poses = intrinsic_matrix(meta), np.load(os.path.join(args.frames, "poses.npy"))
     tsdf = WeightedTSDF()
+    masks = os.path.join(args.frames, "mask")  # person_mask.py: people (0) stay out of the mesh
     for i, color, depth in iter_frames(args.frames, meta, "depth_ffs"):
+        if os.path.isdir(masks):
+            depth[cv2.imread(os.path.join(masks, f"{i:06d}.png"), cv2.IMREAD_GRAYSCALE) == 0] = 0
         tsdf.integrate(depth, color, K, poses[i], meta["depth_scale"])  # filtered when live.py saved it
     grid = tsdf.voxel_grid()
     mesh = tsdf.mesh(grid)

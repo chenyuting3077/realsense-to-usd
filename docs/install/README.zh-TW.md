@@ -1,6 +1,6 @@
 # 安裝
 
-[English](INSTALL.md)
+[English](README.md)
 
 全部在同一個 conda 環境裡跑（下面用 `realsense-to-usd`，名稱不限）。所有指令都在 repo 根目錄執行。
 `export` 那行只給這頁的編譯用（指到環境裡 pip 安裝的 CUDA 13 toolkit），整個安裝過程請用同一個終端機。
@@ -76,6 +76,15 @@ python recon/export_ffs_trt.py   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engin
 
 TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。
 
+### 人物分割（TensorRT）
+
+```bash
+python recon/export_seg_trt.py   # -> output/seg/person_dlv3_r50_480x848_fp16.engine（約 4 分鐘）
+```
+
+DeepLabV3-ResNet50（torchvision 權重）、fp16：在 depth thread 裡接在 FFS 後面，每幀約 8 ms。沒有這個引擎時
+即時地圖裡會有人，`gs/offline.py` 再用 PyTorch 遮掉。
+
 ### FastGS
 
 ```bash
@@ -87,7 +96,8 @@ pip install --no-build-isolation ~/FastGS/submodules/simple-knn ~/FastGS/submodu
 ```
 
 patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中途 `cudaErrorIllegalAddress`）、
-投影矩陣支援偏離中心的主點（D455 color 的主點偏好幾個 px，不修正時高斯和 TSDF mesh 差約 9 mm）。
+投影矩陣支援偏離中心的主點（D455 color 的主點偏好幾個 px，不修正時高斯和 TSDF mesh 差約 9 mm）、
+每張影像的 mask（`<dataset>/masks/`，0 的地方不算 loss：`recon/person_mask.py` 找到的人）。
 
 ### Jetson
 

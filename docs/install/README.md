@@ -1,6 +1,6 @@
 # Installation
 
-[繁體中文](INSTALL.zh-TW.md)
+[繁體中文](README.zh-TW.md)
 
 Everything runs in one conda env (`realsense-to-usd` below; any name works). Run all commands from the repo root.
 The `export` line is only for the builds on this page (it points them at the CUDA 13 toolkit pip-installed into the env):
@@ -76,6 +76,15 @@ python recon/export_ffs_trt.py   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engin
 
 TensorRT is pip-installed into the env, leaving a system TensorRT alone. An engine is tied to its input size and TensorRT version.
 
+### Person segmentation (TensorRT)
+
+```bash
+python recon/export_seg_trt.py   # -> output/seg/person_dlv3_r50_480x848_fp16.engine (~4 min)
+```
+
+DeepLabV3-ResNet50 (torchvision weights), fp16: ~8 ms a frame after FFS in the depth thread. Without the
+engine people stay in the live map and `gs/offline.py` masks them with PyTorch.
+
 ### FastGS
 
 ```bash
@@ -88,7 +97,8 @@ pip install --no-build-isolation ~/FastGS/submodules/simple-knn ~/FastGS/submodu
 
 The patch: CUDA 13 build fixes, a tile-list out-of-bounds write in the rasterizer
 (`cudaErrorIllegalAddress` mid-training), and an off-center principal point in the projection matrix (the D455 color camera's is
-off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh).
+off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh), and per-image masks
+(`<dataset>/masks/`, no loss where 0: the people found by `recon/person_mask.py`).
 
 ### Jetson
 

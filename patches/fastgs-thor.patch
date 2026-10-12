@@ -1,5 +1,5 @@
 diff --git a/scene/cameras.py b/scene/cameras.py
-index abf6e52..bcb883f 100755
+index abf6e52..6920b8e 100755
 --- a/scene/cameras.py
 +++ b/scene/cameras.py
 @@ -17,7 +17,8 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix
@@ -8,11 +8,20 @@ index abf6e52..bcb883f 100755
                   image_name, uid,
 -                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
 +                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
-+                 cx_frac=0.5, cy_frac=0.5
++                 cx_frac=0.5, cy_frac=0.5, keep_mask=None
                   ):
          super(Camera, self).__init__()
  
-@@ -52,7 +53,8 @@ class Camera(nn.Module):
+@@ -44,6 +45,8 @@ class Camera(nn.Module):
+             self.original_image *= gt_alpha_mask.to(self.data_device)
+         else:
+             self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
++        # 1xHxW bool, False where no loss is taken (e.g. people); None: everywhere
++        self.keep_mask = None if keep_mask is None else keep_mask.to(self.data_device)
+ 
+         self.zfar = 100.0
+         self.znear = 0.01
+@@ -52,10 +55,19 @@ class Camera(nn.Module):
          self.scale = scale
  
          self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
@@ -22,21 +31,34 @@ index abf6e52..bcb883f 100755
          self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
          self.camera_center = self.world_view_transform.inverse()[3, :3]
  
++    def gt_for(self, render):
++        """The ground truth with the masked pixels replaced by `render` (detached): L1 and SSIM
++        are 0 there and no gradient flows from them."""
++        gt = self.original_image.cuda()
++        if self.keep_mask is None:
++            return gt
++        return torch.where(self.keep_mask.cuda(), gt, render.detach())
++
+ class MiniCam:
+     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
+         self.image_width = width
 diff --git a/scene/dataset_readers.py b/scene/dataset_readers.py
-index 2a6f904..d535f7f 100755
+index 2a6f904..751893a 100755
 --- a/scene/dataset_readers.py
 +++ b/scene/dataset_readers.py
-@@ -34,6 +34,9 @@ class CameraInfo(NamedTuple):
+@@ -34,6 +34,11 @@ class CameraInfo(NamedTuple):
      image_name: str
      width: int
      height: int
 +    # principal point as a fraction of the image size; 3DGS assumed (0.5, 0.5)
 +    cx_frac: float = 0.5
 +    cy_frac: float = 0.5
++    # <dataset>/masks/<image name>: no loss where 0 (e.g. people); None without one
++    mask: object = None
  
  class SceneInfo(NamedTuple):
      point_cloud: BasicPointCloud
-@@ -86,11 +89,13 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+@@ -86,20 +91,25 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
              focal_length_x = intr.params[0]
              FovY = focal2fov(focal_length_x, height)
              FovX = focal2fov(focal_length_x, width)
@@ -50,13 +72,16 @@ index 2a6f904..d535f7f 100755
          else:
              assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
  
-@@ -99,7 +104,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+         image_path = os.path.join(images_folder, os.path.basename(extr.name))
+         image_name = os.path.basename(image_path).split(".")[0]
          image = Image.open(image_path)
++        mask_path = os.path.join(os.path.dirname(images_folder), "masks", os.path.basename(extr.name))
++        mask = Image.open(mask_path).convert("L") if os.path.exists(mask_path) else None
  
          cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
 -                              image_path=image_path, image_name=image_name, width=width, height=height)
 +                              image_path=image_path, image_name=image_name, width=width, height=height,
-+                              cx_frac=cx / width, cy_frac=cy / height)
++                              cx_frac=cx / width, cy_frac=cy / height, mask=mask)
          cam_infos.append(cam_info)
      sys.stdout.write('\n')
      return cam_infos
@@ -191,20 +216,71 @@ index 2370948..f95c499 100755
  #include <iostream>
  #include <vector>
  #include "rasterizer.h"
+diff --git a/train.py b/train.py
+index 0cf7e1f..aa09b05 100755
+--- a/train.py
++++ b/train.py
+@@ -97,7 +97,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
+         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+ 
+         # Loss
+-        gt_image = viewpoint_cam.original_image.cuda()
++        gt_image = viewpoint_cam.gt_for(image)
+         Ll1 = l1_loss(image, gt_image)
+         ssim_value = fast_ssim(image.unsqueeze(0), gt_image.unsqueeze(0))
+         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value)
 diff --git a/utils/camera_utils.py b/utils/camera_utils.py
-index 1a54d0a..93fc75b 100755
+index 1a54d0a..5050276 100755
 --- a/utils/camera_utils.py
 +++ b/utils/camera_utils.py
-@@ -49,7 +49,8 @@ def loadCam(args, id, cam_info, resolution_scale):
+@@ -11,6 +11,8 @@
+ 
+ from scene.cameras import Camera
+ import numpy as np
++import torch
++from PIL import Image
+ from utils.general_utils import PILtoTorch
+ from utils.graphics_utils import fov2focal
+ 
+@@ -46,10 +48,15 @@ def loadCam(args, id, cam_info, resolution_scale):
+     if resized_image_rgb.shape[1] == 4:
+         loaded_mask = resized_image_rgb[3:4, ...]
+ 
++    keep_mask = None
++    if cam_info.mask is not None:
++        keep_mask = torch.from_numpy(np.array(cam_info.mask.resize(resolution, Image.NEAREST)) > 127)[None]
++
      return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                    FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                    image=gt_image, gt_alpha_mask=loaded_mask,
 -                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
 +                  image_name=cam_info.image_name, uid=id, data_device=args.data_device,
-+                  cx_frac=cam_info.cx_frac, cy_frac=cam_info.cy_frac)
++                  cx_frac=cam_info.cx_frac, cy_frac=cam_info.cy_frac, keep_mask=keep_mask)
  
  def cameraList_from_camInfos(cam_infos, resolution_scale, args):
      camera_list = []
+diff --git a/utils/fast_utils.py b/utils/fast_utils.py
+index 2fbe9e7..078fc3e 100755
+--- a/utils/fast_utils.py
++++ b/utils/fast_utils.py
+@@ -25,7 +25,7 @@ def get_loss(reconstructed_image, original_image):
+     return l1_loss_norm
+ 
+ def compute_photometric_loss(viewpoint_cam, image):
+-    gt_image = viewpoint_cam.original_image.cuda()
++    gt_image = viewpoint_cam.gt_for(image)
+     Ll1 = l1_loss(image, gt_image)
+     loss = (1.0 - 0.2) * Ll1 + 0.2 * (1.0 - fast_ssim(image.unsqueeze(0), gt_image.unsqueeze(0)))
+     return loss
+@@ -75,7 +75,7 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY =
+         render_image = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult)["render"]
+         photometric_loss = compute_photometric_loss(my_viewpoint_cam, render_image)
+ 
+-        gt_image = my_viewpoint_cam.original_image.cuda()
++        gt_image = my_viewpoint_cam.gt_for(render_image)
+         get_flag = True
+         l1_loss_norm = get_loss(render_image, gt_image)
+         
 diff --git a/utils/graphics_utils.py b/utils/graphics_utils.py
 index b4627d8..019b0b9 100755
 --- a/utils/graphics_utils.py

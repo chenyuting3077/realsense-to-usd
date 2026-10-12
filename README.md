@@ -6,7 +6,7 @@ Hand-held Intel RealSense D455 → live 3D reconstruction → 3D Gaussian Splatt
 
 - **Live** (`run_live.sh`): ORB-SLAM3 stereo + IMU poses, Fast-FoundationStereo depth (TensorRT) and an nvblox TSDF preview, all at once,
   in a window with the map, the tracked image, depth and status. On Stop, a distance-weighted TSDF mesh is built from every stored frame.
-- **Offline** (`run_offline.sh`): the session's frames → TSDF mesh → FastGS 3DGS → `scene.usdc`
+- **Offline** (`run_offline.sh`): the session's frames (people masked out, live or here) → TSDF mesh → FastGS 3DGS → `scene.usdc`
   (Z-up, meters, leveled; Gaussians for display, the decimated mesh as a static collider).
 
 ## Tested environment
@@ -34,9 +34,9 @@ Hand-held D455 (848x480, projector alternating), 187 s, 19.4 m of camera path, J
 | Stop → final mesh (4 m, distance-weighted TSDF) | 3.3 M triangles | 31 s |
 | 3DGS -> USD: TSDF + COLMAP export + FastGS + USD | 364 k Gaussians; `scene.usdc` 169 MB | ~11 min |
 
-![Final mesh](docs/mesh_views.png)
+![Final mesh](docs/lab_loop/mesh_views.png)
 
-![Captured vs 3DGS](docs/3dgs_test_views.png)
+![Captured vs 3DGS](docs/lab_loop/3dgs_test_views.png)
 
 ## Pipeline
 
@@ -44,17 +44,19 @@ Hand-held D455 (848x480, projector alternating), 187 s, 19.4 m of camera path, J
 D455 ──► tracker process: projector-off IR pair ──► ORB-SLAM3 stereo (+ IMU), 30 Hz
      │                                                     │ poses (loop closures → map rebuilt with the corrected trajectory)
      └─► depth thread: newest projector-on IR pair ──► FFS (TensorRT) ──► depth in the color camera
-                                                           │
+                                     people masked out (DeepLabV3, TensorRT) ──┤
                                      mapper: nvblox TSDF preview (depth ≤ 2.5 m) ──► window
 Stop ──► final trajectory ──► distance-weighted TSDF of every stored frame (depth ≤ 4 m) ──► mesh_live.ply
-     └─► frames/ (color + FFS depth + poses), rec/ (every frameset: color, IR, IMU)
+     └─► frames/ (color + FFS depth + person masks + poses), rec/ (every frameset: color, IR, IMU)
 
-3DGS -> USD (window) or run_offline.sh: frames/ ──► TSDF + point cloud ──► COLMAP text ──► FastGS ──► scene.usdc
+3DGS -> USD (window) or run_offline.sh: frames/ ──► (person masks, if not made live) ──► TSDF + point cloud (no people)
+    ──► COLMAP text + masks ──► FastGS (no loss on people) ──► scene.usdc
 ```
 
 ## Installation
 
-See [INSTALL.md](docs/INSTALL.md): the conda env, nvblox, ORB-SLAM3 and its Python binding, Fast-FoundationStereo + TensorRT, FastGS.
+See [docs/install](docs/install/README.md): the conda env, nvblox, ORB-SLAM3 and its Python binding, Fast-FoundationStereo + TensorRT,
+person segmentation, FastGS. Speed and accuracy before and after TensorRT: [docs/tensorrt](docs/tensorrt/README.md).
 
 ## Usage
 
