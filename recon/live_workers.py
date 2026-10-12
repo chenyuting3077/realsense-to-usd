@@ -533,7 +533,7 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
         ORB-SLAM3 starts a new map in a frame of its own until it merges the two)."""
         nonlocal T_all, version, main_map
         t, P, maps = slam.trajectory()
-        main_map = int(np.bincount(maps).argmax()) if len(maps) else slam.current_map_id()
+        main_map = int(np.bincount(maps).argmax()) if len(maps) else slam.state()[2]
         by_us = {int(round(x * 1e6)): T for x, T, m in zip(t, P, maps) if m == main_map}
         new = [by_us.get((ns - t0) // 1000) for ns in ir_ns]
         T_all, bad = drop_outliers([None if T is None or k in bridged else level @ T for k, T in enumerate(new)],
@@ -570,11 +570,11 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
             imu_rows[:, 0] = (imu_rows[:, 0] - t0) / 1e9
         t_prev = t
         # microseconds since the first frame: the trajectory's times map back to these exactly
-        ok, T = slam.track(left, right, (t - t0) // 1000 * 1e-6, imu_rows)
+        ok, T, imu_only, imu_init = slam.track(left, right, (t - t0) // 1000 * 1e-6, imu_rows)
         track_ms = (time.perf_counter() - start) * 1000
         ir_ns.append(t)
-        in_main = main_map is None or slam.current_map_id() == main_map
-        imu_only = ok and inertial and slam.tracking_state() == 3  # Tracking::RECENTLY_LOST
+        new_state = slam.state()
+        in_main = main_map is None or new_state[2] == main_map
         if inertial and not ok and not any(T is not None for T in T_all[-90:]) and len(ir_ns) % 90 == 0:
             out_q.put(("note", "IMU mode: move the camera to start tracking"))
         if imu_only:
@@ -594,11 +594,11 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
                                    "imu" if imu_only else ok, rot["dps"]))
             except queue.Full:
                 pass
-        if inertial and imu_ready and not slam.imu_initialized():
+        if imu_ready and not imu_init:
             # ORB-SLAM3 dropped the map (too little motion after the IMU initialization)
             imu_ready = False
             correct("map reset (move the camera for the IMU)")
-        if inertial and not imu_ready and slam.imu_initialized():
+        if imu_init and not imu_ready:
             # ORB-SLAM3 has turned its world to gravity (Z up): use it as is
             imu_ready, level = True, np.eye(4)
             correct("IMU initialized")
@@ -610,7 +610,6 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
                 level = rotation_to_z(T_k[:3, :3] @ up) @ level
                 correct("re-level (IMU)")
                 first_up()
-        new_state = slam.state()
         if new_state != state:
             names = ("loop / global BA", "map merge", "new map")
             correct(", ".join(n_ for n_, a, b in zip(names, state, new_state) if a != b))

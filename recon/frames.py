@@ -1,4 +1,4 @@
-"""Frames dirs (numbered PNGs per stream + meta.json), depth filtering and pose helpers."""
+"""Frames dirs (numbered PNGs per stream + meta.json), the floor depth filter and pose helpers."""
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -6,11 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 import torch
-import torch.nn.functional as F
 from scipy.spatial.transform import Rotation
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EDGE_THRESH = 0.05  # flying pixels: 3x3 depth spread above this fraction of the depth
+DEVICE = torch.device("cuda")
 
 
 def load_meta(frames_dir):
@@ -39,19 +37,6 @@ def iter_frames(frames_dir, meta, depth_dir, prefetch=16):
             if k + prefetch < n:
                 pending.append(pool.submit(_read_frame, frames_dir, k + prefetch, depth_dir))
             yield k, color, depth
-
-
-def filter_depth(depth, as_tensor=False):
-    """Zero the flying pixels at depth edges, where stereo smears foreground into background.
-    depth: uint16 numpy or a tensor; returns uint16 numpy, or the float tensor on DEVICE."""
-    d = torch.as_tensor(depth.astype(np.float32) if isinstance(depth, np.ndarray) else depth, device=DEVICE).float()
-    h, w = d.shape
-    pad = F.pad(d[None, None], (1, 1, 1, 1), mode="replicate")[0, 0]
-    stack = torch.stack([pad[1 + dy:1 + dy + h, 1 + dx:1 + dx + w] for dy in (-1, 0, 1) for dx in (-1, 0, 1)])
-    valid = stack > 0
-    spread = torch.where(valid, stack, 0).amax(0) - torch.where(valid, stack, torch.inf).amin(0)
-    d = torch.where(~valid.all(0) | (spread > EDGE_THRESH * d), 0, d)
-    return d if as_tensor else d.to(torch.int32).cpu().numpy().astype(np.uint16)
 
 
 class FloorDepth:

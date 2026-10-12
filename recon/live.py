@@ -37,7 +37,7 @@ from nvblox_torch.projective_integrator_types import ProjectiveIntegratorType
 from nvblox_torch.sensor import Sensor
 
 from ffs import FFS, ROOT, DisparityToColorDepth
-from frames import FloorDepth, fill_untracked, filter_depth, interpolate, intrinsic_matrix
+from frames import DEVICE, FloorDepth, fill_untracked, interpolate, intrinsic_matrix
 from live_view import view_process
 from live_workers import track_process
 from reconstruct import WeightedTSDF
@@ -148,11 +148,10 @@ class Depth(threading.Thread):
     def __init__(self, meta, ffs, req_q, in_q, out_q):
         super().__init__(daemon=True)
         self.req_q, self.in_q, self.q, self.ffs = req_q, in_q, out_q, ffs
-        self.dev = torch.device("cuda")
-        self.to_color = DisparityToColorDepth(meta, self.dev)
+        self.to_color = DisparityToColorDepth(meta, DEVICE)
         self.ffs_ms, self.skipped, self.finished = [], 0, False
         self.stream = torch.cuda.Stream()  # syncing it does not wait for nvblox
-        z = torch.zeros(meta["stereo"]["height"], meta["stereo"]["width"], dtype=torch.uint8, device=self.dev)
+        z = torch.zeros(meta["stereo"]["height"], meta["stereo"]["width"], dtype=torch.uint8, device=DEVICE)
         with torch.cuda.stream(self.stream):
             self.ffs(z, z)  # warm up
         self.stream.synchronize()
@@ -169,11 +168,11 @@ class Depth(threading.Thread):
                 self.skipped += i - last - 1
                 last = i
                 t = time.perf_counter()
-                disp = self.ffs(torch.as_tensor(ir1, device=self.dev), torch.as_tensor(ir2, device=self.dev))
+                disp = self.ffs(torch.as_tensor(ir1, device=DEVICE), torch.as_tensor(ir2, device=DEVICE))
                 # Wait here, where the GIL is released: the warp's indexing would sync holding it.
                 self.stream.synchronize()
-                depth = filter_depth(self.to_color(disp), as_tensor=True)
-                color = torch.from_numpy(color).to(self.dev)
+                depth = self.to_color(disp)
+                color = torch.from_numpy(color).to(DEVICE)
                 self.stream.synchronize()  # nvblox reads them on its own stream
                 self.ffs_ms.append((time.perf_counter() - t) * 1000)
                 self.q.put((t_ns, wall, depth, color))

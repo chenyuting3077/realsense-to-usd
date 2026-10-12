@@ -1,4 +1,4 @@
-"""Fast-FoundationStereo depth: TensorRT disparity of an IR pair, warped into the color camera."""
+"""Fast-FoundationStereo depth: TensorRT disparity of an IR pair -> filtered depth in the color camera."""
 import os
 import sys
 
@@ -6,9 +6,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from frames import intrinsic_matrix
+
 FFS_ROOT = os.path.expanduser("~/Fast-FoundationStereo")
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 ENGINE = os.path.join(ROOT, "output/ffs/ffs_480x864_it8_fp32_tf32.engine")  # export_ffs_trt.py: 848x480 padded to 32
+EDGE_THRESH = 0.05  # flying pixels: 3x3 depth spread above this fraction of the depth
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 
@@ -63,16 +66,25 @@ class FFS:
         return disp
 
 
+def drop_flying_pixels(d):
+    """Zero depth next to a hole or on an edge (3x3 spread over EDGE_THRESH of it), where stereo
+    smears foreground into background. max_pool2d pads with -inf: outside pixels are ignored."""
+    x = d[None, None]
+    hole = F.max_pool2d((x <= 0).float(), 3, 1, 1) > 0
+    spread = F.max_pool2d(x, 3, 1, 1) + F.max_pool2d(-torch.where(x > 0, x, torch.inf), 3, 1, 1)
+    return torch.where(hole | (spread > EDGE_THRESH * x), 0, x)[0, 0]
+
+
 class DisparityToColorDepth:
-    """Left-IR disparity -> depth (m) in the color camera, 0 where none: each point splatted to its
-    2x2 pixel neighbourhood, nearest depth wins."""
+    """Left-IR disparity -> filtered depth (m) in the color camera, 0 where none: each point splatted
+    to its 2x2 pixel neighbourhood, nearest depth wins."""
 
     def __init__(self, meta, dev):
         st = meta["stereo"]
         self.H, self.W, self.dev = meta["height"], meta["width"], dev
         self.fx_baseline = st["fx"] * float(np.linalg.norm(np.array(st["ir1_from_ir2"])[:3, 3]))
         self.K_ir = torch.tensor([[st["fx"], 0, st["cx"]], [0, st["fy"], st["cy"]], [0, 0, 1]], device=dev)
-        self.K_c = torch.tensor([[meta["fx"], 0, meta["cx"]], [0, meta["fy"], meta["cy"]], [0, 0, 1]], device=dev)
+        self.K_c = torch.tensor(intrinsic_matrix(meta), device=dev, dtype=torch.float32)
         self.color_from_ir1 = torch.tensor(np.linalg.inv(np.array(st["ir1_from_color"])), device=dev,
                                            dtype=torch.float32)
         self.v, self.u = torch.meshgrid(torch.arange(st["height"], device=dev, dtype=torch.float32),
@@ -91,4 +103,4 @@ class DisparityToColorDepth:
                 x, y = torch.floor(pu).long() + du, torch.floor(pv).long() + dv
                 m = (x >= 0) & (x < W) & (y >= 0) & (y < H) & (Y[2] > 0)
                 depth.scatter_reduce_(0, y[m] * W + x[m], Y[2][m], reduce="amin")
-        return torch.where(torch.isinf(depth), 0, depth).reshape(H, W)
+        return drop_flying_pixels(torch.where(torch.isinf(depth), 0, depth).reshape(H, W))

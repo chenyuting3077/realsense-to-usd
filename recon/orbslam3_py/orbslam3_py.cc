@@ -1,13 +1,12 @@
 // Minimal Python binding of ORB-SLAM3 stereo for live use (recon/live.py).
 //
 //   slam = orbslam3_py.Stereo(vocabulary, settings_yaml, inertial=False)
-//   ok, T_w_c = slam.track(left, right, t_sec)    # uint8 HxW rectified pair; T_w_c 4x4 or None
-//   ok, T_w_c = slam.track(left, right, t_sec, imu)  # inertial: imu Nx7 (t_sec, ax, ay, az, gx, gy, gz),
-//                     # the IMU samples since the previous frame, in the IMU frame of the settings' IMU.T_b_c1
-//   slam.imu_initialized()  # inertial: gravity and biases estimated (the world is then gravity-aligned)
+//   ok, T_w_c, imu_only, imu_ready = slam.track(left, right, t_sec[, imu])
+//                     # uint8 HxW rectified pair; T_w_c 4x4 or None; imu Nx7 (t_sec, ax, ay, az, gx, gy, gz):
+//                     # the samples since the previous frame, in the IMU frame of the settings' IMU.T_b_c1;
+//                     # imu_only: a pose carried on the IMU alone; imu_ready: gravity and biases estimated
 //   slam.state()      # (big change count, maps, current map id): any change means keyframe poses
 //                     # moved or a map started (loop closure / global BA, map merge, tracking lost)
-//   slam.current_map_id(), slam.big_change_count()
 //   slam.keypoints()  # Nx3 float32 (x, y, matched to a map point) of the last tracked left image
 //   t, T_w_c, map_id = slam.trajectory()           # every tracked frame, from the current keyframe poses
 //   slam.shutdown()
@@ -78,13 +77,10 @@ class Stereo {
     }
     // With an initialized IMU, RECENTLY_LOST still has a pose (predicted from the IMU, for a few
     // seconds): what bridges a blurred or textureless stretch.
-    const bool ok = state == ORB_SLAM3::Tracking::OK || state == ORB_SLAM3::Tracking::OK_KLT ||
-                    (imu_ready && state == ORB_SLAM3::Tracking::RECENTLY_LOST);
-    if (!ok) return py::make_tuple(false, py::none());
-    return py::make_tuple(true, to_numpy(Tcw.inverse()));
+    const bool imu_only = imu_ready && state == ORB_SLAM3::Tracking::RECENTLY_LOST;
+    const bool ok = state == ORB_SLAM3::Tracking::OK || state == ORB_SLAM3::Tracking::OK_KLT || imu_only;
+    return py::make_tuple(ok, ok ? py::object(to_numpy(Tcw.inverse())) : py::none(), imu_only, imu_ready);
   }
-
-  int big_change_count() { return slam_.GetAtlas()->GetLastBigChangeIdx(); }
 
   // Same walk as System::SaveTrajectoryEuRoC: each frame is stored relative to its
   // reference keyframe; culled keyframes are replaced by their parent in the spanning tree.
@@ -146,12 +142,6 @@ class Stereo {
     return out;
   }
 
-  long current_map_id() { return slam_.GetAtlas()->GetCurrentMap()->GetId(); }
-
-  bool imu_initialized() { return inertial_ && slam_.GetAtlas()->isImuInitialized(); }
-
-  int tracking_state() { return slam_.GetTrackingState(); }
-
   py::tuple state() {
     ORB_SLAM3::Atlas* atlas = slam_.GetAtlas();
     ORB_SLAM3::Map* map = atlas->GetCurrentMap();
@@ -175,12 +165,8 @@ PYBIND11_MODULE(orbslam3_py, m) {
       .def(py::init<const std::string&, const std::string&, bool>(), py::arg("vocabulary"), py::arg("settings"),
            py::arg("inertial") = false)
       .def("track", &Stereo::track, py::arg("left"), py::arg("right"), py::arg("t"), py::arg("imu") = py::none())
-      .def("imu_initialized", &Stereo::imu_initialized)
-      .def("tracking_state", &Stereo::tracking_state)
       .def("state", &Stereo::state)
-      .def("big_change_count", &Stereo::big_change_count)
       .def("trajectory", &Stereo::trajectory)
       .def("keypoints", &Stereo::keypoints)
-      .def("current_map_id", &Stereo::current_map_id)
       .def("shutdown", &Stereo::shutdown);
 }
