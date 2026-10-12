@@ -56,7 +56,8 @@ Stop ──► final trajectory ──► distance-weighted TSDF of every stored
 ## Installation
 
 See [docs/install](docs/install/README.md): the conda env, nvblox, ORB-SLAM3 and its Python binding, Fast-FoundationStereo + TensorRT,
-person segmentation, FastGS. Speed and accuracy before and after TensorRT: [docs/tensorrt](docs/tensorrt/README.md).
+person segmentation, FastGS. Speed and accuracy before and after TensorRT: [docs/tensorrt](docs/tensorrt/README.md);
+faster FFS settings: [docs/ffs_speed](docs/ffs_speed/README.md).
 
 ## Usage
 

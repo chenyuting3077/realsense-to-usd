@@ -56,7 +56,8 @@ Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（�
 ## 安裝
 
 見 [docs/install](docs/install/README.zh-TW.md)：conda 環境、nvblox、ORB-SLAM3 與 Python binding、Fast-FoundationStereo + TensorRT、
-人物分割、FastGS。TensorRT 加速前後的速度與精度：[docs/tensorrt](docs/tensorrt/README.zh-TW.md)。
+人物分割、FastGS。TensorRT 加速前後的速度與精度：[docs/tensorrt](docs/tensorrt/README.zh-TW.md)；
+更快的 FFS 設定：[docs/ffs_speed](docs/ffs_speed/README.zh-TW.md)。
 
 ## 使用
 

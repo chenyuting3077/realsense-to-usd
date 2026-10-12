@@ -1,20 +1,20 @@
 """Build the Fast-FoundationStereo TensorRT engine of recon/ffs.py (fp32 with TF32, 8 iterations,
-480x864), through the ONNX-compatible cost volumes of FFS's scripts/make_single_onnx.py.
+480x864 = 848x480 padded to 32, max disparity 192), through the ONNX-compatible cost volumes of
+FFS's scripts/make_single_onnx.py. Other sizes / max disparities go to recon.ffs.engine_path().
 
-Usage: python -m recon.export_ffs_trt   (~5 min)
+Usage: python -m recon.export_ffs_trt [--height 384 --width 640] [--max-disp 128]   (~5 min)
 """
+import argparse
 import os
 import sys
 
 import torch
 
-from recon.ffs import ENGINE, FFS_ROOT, load_model
-
-HEIGHT, WIDTH = 480, 864
+from recon.ffs import FFS_ROOT, engine_path, load_model
 
 
-def export_onnx(path):
-    model = load_model()
+def export_onnx(path, height, width, max_disp):
+    model = load_model(max_disp=max_disp)
     model.args.mixed_precision = False
     sys.path.insert(0, os.path.join(FFS_ROOT, "scripts"))
     import core.foundation_stereo as fs
@@ -23,7 +23,7 @@ def export_onnx(path):
     fs.build_gwc_volume_optimized_pytorch1 = ms._build_gwc_volume_onnx
     fs.build_concat_volume_optimized_pytorch1 = ms._build_concat_volume_onnx
     wrapper = ms.FastFoundationStereoSingleOnnx(model).cuda().eval()
-    x = [torch.randn(1, 3, HEIGHT, WIDTH, device="cuda") for _ in range(2)]
+    x = [torch.randn(1, 3, height, width, device="cuda") for _ in range(2)]
     with torch.no_grad():
         torch.onnx.export(wrapper, tuple(x), path, opset_version=17, dynamo=False,
                           input_names=["left_image", "right_image"], output_names=["disparity"],
@@ -48,9 +48,15 @@ def build_engine(onnx_path, engine_path):
 
 
 if __name__ == "__main__":
-    os.makedirs(os.path.dirname(ENGINE), exist_ok=True)
-    onnx_path = ENGINE.replace("_tf32.engine", ".onnx")
+    p = argparse.ArgumentParser()
+    p.add_argument("--height", type=int, default=480)
+    p.add_argument("--width", type=int, default=864)
+    p.add_argument("--max-disp", type=int, default=192)
+    args = p.parse_args()
+    engine = engine_path(args.height, args.width, args.max_disp)
+    os.makedirs(os.path.dirname(engine), exist_ok=True)
+    onnx_path = engine.replace("_tf32.engine", ".onnx")
     if not os.path.exists(onnx_path):
-        export_onnx(onnx_path)
-    build_engine(onnx_path, ENGINE)
-    print(f"-> {ENGINE}")
+        export_onnx(onnx_path, args.height, args.width, args.max_disp)
+    build_engine(onnx_path, engine)
+    print(f"-> {engine}")

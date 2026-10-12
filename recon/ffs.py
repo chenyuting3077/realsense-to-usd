@@ -11,6 +11,12 @@ from recon.frames import intrinsic_matrix
 FFS_ROOT = os.path.expanduser("~/Fast-FoundationStereo")
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 ENGINE = os.path.join(ROOT, "output/ffs/ffs_480x864_it8_fp32_tf32.engine")  # export_ffs_trt.py: 848x480 padded to 32
+
+
+def engine_path(height=480, width=864, max_disp=192):
+    """export_ffs_trt.py's engine for that padded input size and max disparity (8 iterations, fp32 + TF32)."""
+    md = "" if max_disp == 192 else f"_md{max_disp}"
+    return os.path.join(ROOT, f"output/ffs/ffs_{height}x{width}_it8{md}_fp32_tf32.engine")
 EDGE_THRESH = 0.05  # flying pixels: 3x3 depth spread above this fraction of the depth
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
@@ -29,9 +35,11 @@ def load_model(valid_iters=8, max_disp=192):
 
 
 class FFS:
-    """ffs(left, right): HxW uint8 CUDA tensors -> HxW float32 disparity of the left image."""
+    """ffs(left, right): HxW uint8 CUDA tensors -> HxW float32 disparity of the left image. With
+    scale < 1 the pair is downscaled (area) for the engine and the disparity scaled back up."""
 
-    def __init__(self, engine=ENGINE):
+    def __init__(self, engine=ENGINE, scale=1.0):
+        self.scale = scale
         import tensorrt as trt
         if not os.path.exists(engine):
             raise SystemExit(f"{engine} not found: build it with python -m recon.export_ffs_trt")
@@ -51,10 +59,13 @@ class FFS:
 
     @torch.no_grad()
     def __call__(self, left, right):
-        h, w = left.shape
+        h0, w0 = left.shape
+        imgs = [torch.as_tensor(x, device="cuda").float()[None, None] for x in (left, right)]
+        if self.scale != 1:
+            imgs = [F.interpolate(x, scale_factor=self.scale, mode="area") for x in imgs]
+        h, w = imgs[0].shape[2:]
         H, W = self.shape
-        imgs = [F.pad(torch.as_tensor(x, device="cuda").float()[None, None].expand(1, 3, -1, -1),
-                      (0, W - w, 0, H - h), mode="replicate") for x in (left, right)]
+        imgs = [F.pad(x.expand(1, 3, -1, -1), (0, W - w, 0, H - h), mode="replicate") for x in imgs]
         self.stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.stream):
             bufs = [((x - self.mean) / self.std).contiguous() for x in imgs]
@@ -62,6 +73,8 @@ class FFS:
                 self.context.set_tensor_address(name, b.data_ptr())
             self.context.execute_async_v3(self.stream.cuda_stream)
             disp = self.out[0, 0, :h, :w].clone()  # self.out is reused by the next call
+            if self.scale != 1:
+                disp = F.interpolate(disp[None, None], size=(h0, w0), mode="bilinear")[0, 0] * (w0 / w)
         torch.cuda.current_stream().wait_stream(self.stream)
         return disp
 
