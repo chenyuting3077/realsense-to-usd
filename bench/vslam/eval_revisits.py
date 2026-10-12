@@ -2,7 +2,7 @@
 time (a revisit) should have depth that lines up. For each revisit pair, ICP (point-to-plane, FFS depth)
 starts from the trajectory's relative pose; how far ICP moves it is that trajectory's error there.
 
-    python docs/vslam/eval_revisits.py output/live_x/frames orb=orb.tum ov=ov.tum ovrtab=rtab.tum
+    python -m bench.vslam.eval_revisits output/live_x/frames orb=orb.tum ov=ov.tum ovrtab=rtab.tum
 
 Trajectories are TUM files (s, xyz, qxyzw) of left-IR poses; `orb` may also be given as poses.npy
 (color-camera poses of frames/, as main.py saves them).

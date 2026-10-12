@@ -4,7 +4,7 @@
 
 Hand-held Intel RealSense D455 → live 3D reconstruction → 3D Gaussian Splatting → a USD stage for NVIDIA Isaac Sim.
 
-- **Live** (`python main.py`): ORB-SLAM3 stereo + IMU poses, Fast-FoundationStereo depth (TensorRT) and an nvblox TSDF preview, all at once,
+- **Live** (`python main.py`): OpenVINS stereo + IMU poses with RTAB-Map's loop closures, Fast-FoundationStereo depth (TensorRT) and an nvblox TSDF preview, all at once,
   in a window with the map, the tracked image, depth and status. On Stop, a distance-weighted TSDF mesh is built from every stored frame.
 - **Offline** (`python -m gs.offline`): the session's frames (people masked out, live or here) → TSDF mesh → FastGS 3DGS → `scene.usdc`
   (Z-up, meters, leveled; Gaussians for display, the decimated mesh as a static collider).
@@ -41,7 +41,7 @@ Hand-held D455 (848x480, projector alternating), 187 s, 19.4 m of camera path, J
 ## Pipeline
 
 ```
-D455 ──► tracker process: projector-off IR pair ──► ORB-SLAM3 stereo (+ IMU), 30 Hz
+D455 ──► tracker process: projector-off IR pair + IMU ──► OpenVINS, 30 Hz; RTAB-Map on its keyframes, 2 Hz
      │                                                     │ poses (loop closures → map rebuilt with the corrected trajectory)
      └─► depth thread: newest projector-on IR pair ──► FFS (TensorRT) ──► depth in the color camera
                                      people masked out (DeepLabV3, TensorRT) ──┤
@@ -55,7 +55,7 @@ Stop ──► final trajectory ──► distance-weighted TSDF of every stored
 
 ## Installation
 
-See [docs/install](docs/install/README.md): the conda env, nvblox, ORB-SLAM3 and its Python binding, Fast-FoundationStereo + TensorRT,
+See [docs/install](docs/install/README.md): the conda env, nvblox, OpenVINS + RTAB-Map and their Python binding, Fast-FoundationStereo + TensorRT,
 person segmentation, FastGS. Speed of every node and how it got there, with accuracy: [docs/speed](docs/speed/README.md);
 ORB-SLAM3 vs OpenVINS (+ RTAB-Map), VINS-Fusion and cuVSLAM on the recordings: [docs/vslam](docs/vslam/README.md).
 
@@ -67,11 +67,12 @@ python main.py -o output/live_room       # Stop in the window or Ctrl+C to end
 python -m gs.offline output/live_room  # -> scene.usdc, or 3DGS -> USD in the window
 ```
 
-Hold the camera still for a second at the start (leveling with the IMU), then move it. Keep the D455 on USB 3.
+Hold the camera still at the start, then move it: OpenVINS starts on the first motion. Keep the D455 on USB 3.
 
 ## References
 
-- [ORB-SLAM3](https://github.com/UZ-SLAMLab/ORB_SLAM3)
+- [OpenVINS](https://github.com/rpng/open_vins)
+- [RTAB-Map](https://github.com/introlab/rtabmap)
 - [Fast-FoundationStereo](https://github.com/NVlabs/Fast-FoundationStereo)
 - [nvblox](https://github.com/nvidia-isaac/nvblox)
 - [FastGS](https://github.com/fastgs/FastGS)

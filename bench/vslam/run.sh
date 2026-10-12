@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenVINS + RTAB-Map on one recorded session, in docker (see run_session.sh for MODE, SKIP_OV).
-#   [MODE=stereo|rgbd] [SKIP_OV=1] docs/vslam/run.sh <session dir with rec/ and frames/> <work dir>
+#   [MODE=stereo|rgbd] [SKIP_OV=1] bench/vslam/run.sh <session dir with rec/ and frames/> <work dir>
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 SESSION=$(realpath "$1")

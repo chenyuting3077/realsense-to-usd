@@ -1,6 +1,6 @@
 #!/bin/bash
-# VINS-Fusion on one recorded session, in docker (docker build -t vins:noetic docs/vslam/vins).
-#   docs/vslam/vins/run.sh <session dir with rec/> <work dir>
+# VINS-Fusion on one recorded session, in docker (docker build -t vins:noetic bench/vslam/vins).
+#   bench/vslam/vins/run.sh <session dir with rec/> <work dir>
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SESSION=$(realpath "$1")

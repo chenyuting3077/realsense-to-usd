@@ -92,7 +92,7 @@ GREEN, YELLOW, RED, GREY = (0.35, 0.85, 0.45), (1.0, 0.8, 0.25), (1.0, 0.35, 0.3
 def status_lines(s, cam):
     """(text, color) lines: tracking, depth, map; then corrections and notes in grey."""
     if s is None:
-        return [("Starting camera, ORB-SLAM3 and FFS ...", GREY)]
+        return [("Starting camera, OpenVINS and FFS ...", GREY)]
     if cam is None or cam["ok"]:
         track = ("TRACKING", GREEN if cam is None or cam["matched"] >= LOW_MATCHES else YELLOW)
     else:

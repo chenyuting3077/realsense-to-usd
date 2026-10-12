@@ -40,30 +40,19 @@ cmake --build ~/nvblox/build -j12
 取代原本鎖定的版本、`NVBLOX_FREE_SPACE_VOX`（限制 free space 清除的距離）、`add_color_frame(..., depth_frame)`（用對齊的深度融合顏色）、
 `NVBLOX_STREAM_PRIORITY`（`main.py` 讓融合在 GPU 上排在 FFS 前面）。
 
-### ORB-SLAM3 與 Python binding
+### OpenVINS + RTAB-Map 與 Python binding
 
 ```bash
-git clone -b v0.9.3 https://github.com/stevenlovegrove/Pangolin.git ~/Pangolin
-cmake -S ~/Pangolin -B ~/Pangolin/build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF \
-    -DBUILD_PANGOLIN_PYTHON=OFF -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$HOME/.local/pangolin
-cmake --build ~/Pangolin/build -j12 && cmake --install ~/Pangolin/build
-git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git ~/ORB_SLAM3 && git -C ~/ORB_SLAM3 checkout 4452a3c
-git -C ~/ORB_SLAM3 apply $PWD/patches/orbslam3-thor.patch
-(cd ~/ORB_SLAM3 && for d in Thirdparty/DBoW2 Thirdparty/g2o; do
-     cmake -S $d -B $d/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 && cmake --build $d/build -j12; done
- tar -xf Vocabulary/ORBvoc.txt.tar.gz -C Vocabulary
- cmake -B build -DCMAKE_BUILD_TYPE=Release -DPangolin_DIR=$HOME/.local/pangolin/lib/cmake/Pangolin
- cmake --build build -j8 --target ORB_SLAM3)
-
-cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DPython3_EXECUTABLE=$(which python) \
-    -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
-cmake --build recon/orbslam3_py/build -j8   # -> recon/orbslam3_py/orbslam3_py.cpython-312-*.so
+git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git ~/ceres-2.2
+git clone https://github.com/rpng/open_vins.git ~/open_vins && git -C ~/open_vins checkout 6948812
+git clone --depth 1 --branch 0.23.13-jazzy https://github.com/introlab/rtabmap.git ~/rtabmap
+recon/vio_py/build_deps.sh   # Ceres、OpenVINS（不用 ROS）、RTAB-Map 核心 -> ~/.local/{ceres,open_vins,rtabmap}
+recon/vio_py/build.sh        # -> recon/vio_py/vio_py.cpython-312-*.so
 ```
 
-patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rectified 雙目印設定時不再 segfault、
-給 binding 用的 `GetTracker()` / `GetAtlas()`、雙目 + IMU 遇到沒有預積分的幀時跳過 IMU 預測（原本解參考空指標）、
-「Not enough motion」的地圖重置只用在單眼。
-ORB-SLAM3、Fast-FoundationStereo、FastGS 都要照這裡的指令放在 `~/`。
+全部用系統的 Eigen 3.4 和 OpenCV 4.6（conda 的 Ceres 是用 Eigen 5 編的）。OpenVINS 用 master：v2.7 用的是
+Ceres 2.2 已移除的 `LocalParameterization`。腳本會隱藏已載入的 ROS 2。OpenVINS（它的 `config/rs_d455`）、
+Fast-FoundationStereo、FastGS 都要照這裡的指令放在 `~/`。
 
 ### Fast-FoundationStereo + TensorRT
 
@@ -105,7 +94,7 @@ patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中
 sudo jetson_clocks   # GPU 與記憶體鎖最高時脈（否則 GPU 在兩次 FFS 之間降頻）；每次開機後要重跑
 ```
 
-`jetson_clocks` 不動 CPU（仍是 `schedutil`）；CPU 鎖最高時 ORB-SLAM3 每幀 22 ms 而不是 32 ms
+`jetson_clocks` 不動 CPU（仍是 `schedutil`）；CPU 鎖最高時追蹤和建圖都比較快
 （[docs/speed](../speed/README.zh-TW.md)）。每次開機自動設定：
 
 ```bash

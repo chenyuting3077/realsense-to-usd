@@ -2,14 +2,14 @@
 
 [繁體中文](README.zh-TW.md)
 
-main.py tracks with ORB-SLAM3 (stereo + IMU). Four other widely used visual(-inertial) SLAM systems on the same input,
+ORB-SLAM3 and four other widely used visual(-inertial) SLAM systems on the same input,
 **stability first, accuracy second**: the projector-off IR pair (848x480, ~28 Hz) and the IMU (200 Hz) of 5 recordings,
 replayed offline on the Jetson AGX Thor. There is no ground truth: stability is judged against the session's own IMU,
 accuracy against ORB-SLAM3 and by how well depth lines up where the camera comes back to a place.
 
 | | Type | Loop closure | Runs as |
 |---|---|---|---|
-| ORB-SLAM3 | feature-based SLAM, stereo + IMU | yes (place recognition, global BA, map merging) | main.py, live (its saved `frames/poses.npy`) |
+| ORB-SLAM3 | feature-based SLAM, stereo + IMU | yes (place recognition, global BA, map merging) | live, when these were recorded (`frames/poses.npy`) |
 | OpenVINS | MSCKF filter VIO, stereo + IMU | no | ROS 2 Jazzy in docker, real time |
 | OpenVINS + RTAB-Map | RTAB-Map's graph on OpenVINS' odometry, with the IR pair (`stereo`) or color + FFS depth (`rgbd`) for loop closures | yes | ROS 2 Jazzy in docker, real time |
 | VINS-Fusion | optimization VIO, stereo + IMU; `vins_loop`: with loop_fusion (4-DoF pose graph) | yes | ROS 1 Noetic in docker, real time |
@@ -18,11 +18,11 @@ accuracy against ORB-SLAM3 and by how well depth lines up where the camera comes
 Reproduce (the recordings in `output/live_*`, results in `output/vslam/`):
 
 ```bash
-docker build -t ov-rtabmap:jazzy docs/vslam && docker build -t vins:noetic docs/vslam/vins
-docs/vslam/run_all.sh               # OpenVINS, + RTAB-Map stereo / rgbd
-docs/vslam/run_all_cuvslam_vins.sh  # cuVSLAM (conda env realsense-to-usd), VINS-Fusion
-docs/vslam/score_all.sh             # stability, vs ORB-SLAM3, revisits (ICP), RTAB-Map stats; NO_ICP=1 skips ICP
-python docs/vslam/summary.py output output/vslam
+docker build -t ov-rtabmap:jazzy bench/vslam && docker build -t vins:noetic bench/vslam/vins
+bench/vslam/run_all.sh              # OpenVINS, + RTAB-Map stereo / rgbd
+bench/vslam/run_all_cuvslam_vins.sh # cuVSLAM (conda env realsense-to-usd), VINS-Fusion
+bench/vslam/score_all.sh            # stability, vs ORB-SLAM3, revisits (ICP), RTAB-Map stats; NO_ICP=1 skips ICP
+python -m bench.vslam.summary output output/vslam
 ```
 
 ## Results
@@ -76,7 +76,7 @@ the same aisle walked back and forth several times).
 
 | | Per frame | Notes |
 |---|---:|---|
-| ORB-SLAM3 | 35 ms (p90 42) | live, main.py; 760 of 6378 IR pairs skipped on the 249 s one (busy) |
+| ORB-SLAM3 | 35 ms (p90 42) | live; 760 of 6378 IR pairs skipped on the 249 s one (busy) |
 | OpenVINS | 14 ms (p90 19) | Thor CPU |
 | RTAB-Map | 110–200 ms per node | 2 nodes per second, CPU |
 | VINS-Fusion | – | real time; it tracks every other IR pair (its multi-thread mode) |
@@ -93,5 +93,14 @@ The CPU governor was switched to `performance` (all cores at 2.6 GHz) during the
   end of the long recording; its loop closures help on the long one (14.0 → 9.5 cm of ORB-SLAM3).
 - **ORB-SLAM3** is accurate, but jumps once tracking gets hard.
 - **cuVSLAM** is by far the fastest but the least stable on this data (the IR at ~28 Hz with alternating projector).
-- For main.py: keep ORB-SLAM3, or switch to OpenVINS + RTAB-Map for stability. The start could take the first pose
-  (the camera is still then) and a jump detector (> 2 m/s with a still IMU) could switch from ORB-SLAM3 to a VIO.
+
+## main.py's tracker
+
+main.py tracks with OpenVINS + RTAB-Map built natively (`recon/vio.py`, `recon/vio_py`): the settings above, RTAB-Map
+on a keyframe every 0.5 s in a thread, and the IR pairs before OpenVINS starts (the camera still on the IMU) given its
+first pose. Against the docker runs, the same 5 recordings (`python -m bench.vslam.run_native`):
+
+| | Poses for | Jumps | Held still: max | vs ORB-SLAM3, 4 short | vs ORB-SLAM3, 249 s (whole) |
+|---|---:|---:|---:|---:|---:|
+| docker OpenVINS + RTAB-Map stereo | 75% | 0 | 1.0 cm/s | 0.6–2.3 cm | 23.6 cm |
+| recon/vio.py | **91%** | 0 | 0.5 cm/s | 1.5–3.7 cm | 23.3 cm |

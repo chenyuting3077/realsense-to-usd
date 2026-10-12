@@ -1,15 +1,14 @@
-"""Processes of main.py. nvblox and Open3D hold the GIL for tens of ms, so ORB-SLAM3 in a
+"""Processes of main.py. nvblox and Open3D hold the GIL for tens of ms, so the tracker in a
 thread of the mapper would fall behind and lose track; the frame source with tracking
-(track_process) and the window (live_view.py) run in their own processes and use queues.
+(track_process: OpenVINS + RTAB-Map, recon/vio.py) and the window (live_view.py) run in their own
+processes and use queues.
 Child processes ignore SIGINT: Ctrl+C reaches the main process, which asks the source to stop.
 """
-import ssl  # noqa: F401  conda's OpenSSL first: ORB-SLAM3 links the older system libcrypto
+import ssl  # noqa: F401  conda's OpenSSL first: recon/vio_py links the older system libcrypto
 import json
 import os
 import queue
 import signal
-import sys
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,63 +16,12 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
-from recon.frames import interpolate
 from recon.prof import span, summary
 
-ORB_ROOT = os.path.expanduser("~/ORB_SLAM3")
-OUTLIER_CM = 5.0  # IR poses this far from the median of their 7 neighbours are interpolated
-# Every REFINE_S the trajectory is re-read: local BA (and the IMU's VIBA) keep moving the keyframes,
-# a frame's pose from track() does not follow. A move past REFINE_CM / REFINE_DEG rebuilds the map.
-REFINE_S, REFINE_CM, REFINE_DEG = 2.0, 2.0, 1.0
 # 848x480 at 60 fps; color exposure, gain and white balance fixed. The IR exposure is short
 # (less blur when turning) with the gain set by IrExposure.
 CAMERA = {"width": 848, "height": 480, "fps": 60, "ir_exposure_ms": 4, "ir_exposure_max_ms": 8,
           "ir_brightness": 90, "color_exposure_ms": 6, "color_gain": 80, "white_balance": 3900}
-
-SETTINGS = """%YAML:1.0
-File.version: "1.0"
-Camera.type: "Rectified"
-Camera1.fx: {fx}
-Camera1.fy: {fy}
-Camera1.cx: {cx}
-Camera1.cy: {cy}
-Camera.width: {width}
-Camera.height: {height}
-Camera.fps: {fps}
-Stereo.b: {baseline}
-Camera.RGB: 0
-Stereo.ThDepth: 40.0
-ORBextractor.nFeatures: 1200
-ORBextractor.scaleFactor: 1.2
-ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 12
-ORBextractor.minThFAST: 5
-Viewer.KeyFrameSize: 0.05
-Viewer.KeyFrameLineWidth: 1.0
-Viewer.GraphLineWidth: 0.9
-Viewer.PointSize: 2.0
-Viewer.CameraSize: 0.08
-Viewer.CameraLineWidth: 3.0
-Viewer.ViewpointX: 0.0
-Viewer.ViewpointY: -0.7
-Viewer.ViewpointZ: -1.8
-Viewer.ViewpointF: 500.0
-"""  # FAST 12 / 5 (ORB-SLAM3's examples: 20 / 7) keeps more corners in dark IR images
-
-IMU_SETTINGS = """
-IMU.T_b_c1: !!opencv-matrix
-   rows: 4
-   cols: 4
-   dt: f
-   data: [{T}]
-IMU.InsertKFsWhenLost: 0
-IMU.NoiseGyro: 1e-3
-IMU.NoiseAcc: 1e-2
-IMU.GyroWalk: 1e-6
-IMU.AccWalk: 1e-4
-IMU.Frequency: {hz:.1f}
-"""  # as ORB-SLAM3's RealSense_D435i.yaml (the same Bosch BMI055 IMU)
-
 
 class IrExposure:
     """Auto gain at a short IR exposure: every PERIOD frames the mean brightness is moved towards
@@ -267,59 +215,6 @@ class ImuFile:
         return self.rows[np.searchsorted(t, t_a, "right"):np.searchsorted(t, t_b, "right")]
 
 
-def rotation_to_z(u):
-    """4x4 rotation taking direction u to +Z the shortest way (keeps the heading)."""
-    u = np.asarray(u, float) / np.linalg.norm(u)
-    axis, c = np.cross(u, [0.0, 0, 1]), u[2]
-    s = np.linalg.norm(axis)
-    T = np.eye(4)
-    if s > 1e-9:
-        k = axis / s
-        K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
-        T[:3, :3] = np.eye(3) + s * K + (1 - c) * K @ K
-    return T
-
-
-def level_transform(up):
-    """First camera frame -> Z-up world: X the camera's forward made horizontal, origin at the camera."""
-    z = np.asarray(up, float) / np.linalg.norm(up)
-    x = np.array([0.0, 0.0, 1.0]) - z[2] * z
-    x /= np.linalg.norm(x)
-    T = np.eye(4)
-    T[:3, :3] = np.stack([x, np.cross(z, x), z])
-    return T
-
-
-def moved(old, new):
-    """Largest translation (cm) and rotation (deg) between two trajectories, over frames in both."""
-    both = [(A, B) for A, B in zip(old, new) if A is not None and B is not None]
-    if not both:
-        return 0.0, 0.0
-    A, B = (np.stack(x) for x in zip(*both))
-    cm = 100 * np.linalg.norm(A[:, :3, 3] - B[:, :3, 3], axis=1).max()
-    cos = (np.einsum("nij,nij->n", A[:, :3, :3], B[:, :3, :3]) - 1) / 2  # trace(Ra^T Rb)
-    return float(cm), float(np.degrees(np.arccos(np.clip(cos, -1, 1))).max())
-
-
-def drop_outliers(track, t_ns):
-    """Poses more than OUTLIER_CM from the median of their 7 neighbours are interpolated from the
-    others: frames tracked during a loop correction can refer to not yet corrected keyframes."""
-    ok = [i for i, T in enumerate(track) if T is not None]
-    if len(ok) <= 7:
-        return track, []
-    pos = np.stack([track[i][:3, 3] for i in ok])
-    med = np.stack([np.median(pos[max(0, k - 3):k + 4], axis=0) for k in range(len(ok))])
-    bad = [ok[k] for k in np.where(np.linalg.norm(pos - med, axis=1) > OUTLIER_CM / 100)[0]]
-    if not bad:
-        return track, []
-    track = [None if i in bad else T for i, T in enumerate(track)]
-    good = [i for i, T in enumerate(track) if T is not None]
-    for i, T in zip(bad, interpolate([track[i] for i in good], [t_ns[i] for i in good], [t_ns[i] for i in bad],
-                                     max_gap_ns=1_000_000_000)):
-        track[i] = T
-    return track, bad
-
-
 def open_camera(projector):
     """D455 -> (pipeline, meta in the frames-dir layout with "up_ir1", ImuStream, IrExposure).
     projector "alternate": dots on every other frameset (depth), the others clean (tracking);
@@ -473,17 +368,15 @@ def serve_newest(on, req_q, frames_q):
         if item is None:
             return
 
-
-def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None):
-    """source: ("replay", frames dir) or ("camera", duration, rec dir or None, projector).
-    Sends ("ready", meta), waits for ("go", w0), then tracks until the source ends or ("stop",):
-    ("pose", t_ns, T, track ms, lag ms, skipped) per IR pair, ("traj", version, T list, event) per
-    trajectory correction, ("note", text), ("done",). Projector-on framesets go to frames_q on
-    request; view_q gets the tracked image with its ORB features, ~15 Hz."""
+def track_process(source, ctrl_q, out_q, req_q, frames_q, view_q=None):
+    """OpenVINS + RTAB-Map (recon/vio.py) on the frames of `source`, in a process of its own.
+    source: ("replay", frames dir) or ("camera", duration, rec dir or None, projector). Sends ("ready", meta),
+    waits for ("go", w0), then tracks until the source ends or ("stop",): ("pose", t_ns, T, track ms, lag ms,
+    skipped) per IR pair, ("traj", version, T list, event) when RTAB-Map's graph moves or the start is filled in,
+    ("note", text), ("prof", stage timings), ("done",)."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "orbslam3_py"))
-    import orbslam3_py
     from recon.frames import load_meta
+    from recon.vio import IMU_AHEAD_NS, Vio
 
     pipe = imu = None
     if source[0] == "camera":
@@ -492,23 +385,12 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
         meta = load_meta(source[1])
         if meta.get("imu") and os.path.exists(os.path.join(source[1], meta["imu"]["file"])):
             imu = ImuFile(source[1], meta)
-    if inertial and imu is None:
-        out_q.put(("note", "this recording has no imu.csv, tracking with the cameras only"))
-        inertial = False
-    st = meta["stereo"]
-    settings = SETTINGS.format(fx=st["fx"], fy=st["fy"], cx=st["cx"], cy=st["cy"], width=st["width"],
-                               height=st["height"], fps=meta["fps"],
-                               baseline=float(np.linalg.norm(np.array(st["ir1_from_ir2"])[:3, 3])))
-    if inertial:  # ORB-SLAM3's body is the IMU: T_b_c1 = imu_from_ir1
-        T = np.linalg.inv(imu.ir1_from_imu)
-        settings += IMU_SETTINGS.format(T=", ".join(f"{x:.6f}" for x in T.ravel()), hz=float(imu.hz))
-    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
-        f.write(settings)
-        f.flush()
-        slam = orbslam3_py.Stereo(os.path.join(ORB_ROOT, "Vocabulary/ORBvoc.txt"), f.name, inertial)
-    # Z-up world from the accelerometer at the start (else the first camera's frame)
-    up = meta.get("up_ir1")
-    level = level_transform(up) if up else np.eye(4)
+    if imu is None:
+        out_q.put(("note", "this recording has no imu.csv: OpenVINS needs the IMU"))
+        out_q.put(("done",))
+        return
+    meta.setdefault("imu", {"hz": imu.hz, "ir1_from_imu": imu.ir1_from_imu.tolist()})
+    vio = Vio(meta)
     out_q.put(("ready", meta))
     msg = ctrl_q.get()
     if msg[0] != "go":
@@ -523,61 +405,15 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
     src.start()
     server = threading.Thread(target=serve_newest, args=(on, req_q, frames_q), daemon=True)
     server.start()
-    ir_ns, T_all, version, t0, main_map = [], [], 0, None, None
-    bridged = set()  # frames carried on the IMU alone: a few cm off, not given to the mapper
-    releveled = {}
 
-    def control():
-        """("stop",), or ("level", retries) from the D455: the reading taken when the camera opened is
-        seconds older than the first tracked frame, so the world is leveled again once tracking runs."""
-        while True:
-            msg = ctrl_q.get()
-            if msg[0] == "stop":
-                stop.set()
-                return
-            up, spread = imu.up()
-            if spread <= 0.15 and ir_ns:
-                releveled.update(up=up, frame=len(ir_ns) - 1)
-            elif msg[1] > 0 and not stop.is_set():
-                if msg[1] % 5 == 0:
-                    out_q.put(("note", "leveling: hold the camera still for a moment"))
-                threading.Timer(1.0, ctrl_q.put, (("level", msg[1] - 1),)).start()
+    def control():  # ("stop",); ("level", ...) is ORB-SLAM3's: OpenVINS' world is leveled by gravity
+        while ctrl_q.get()[0] != "stop":
+            pass
+        stop.set()
     threading.Thread(target=control, daemon=True).start()
-    if pipe:
-        threading.Timer(0.5, ctrl_q.put, (("level", 30),)).start()
 
-    def correct(kind, only_if_moved=False):
-        """Re-read the trajectory, keeping the map with the most frames (after tracking is lost,
-        ORB-SLAM3 starts a new map in a frame of its own until it merges the two). only_if_moved:
-        only when a frame moved past REFINE_CM / REFINE_DEG from the poses sent so far."""
-        nonlocal T_all, version, main_map
-        with span("track/read trajectory"):
-            t, P, maps = slam.trajectory()
-        main_map_new = int(np.bincount(maps).argmax()) if len(maps) else slam.state()[2]
-        by_us = {int(round(x * 1e6)): T for x, T, m in zip(t, P, maps) if m == main_map_new}
-        new = [by_us.get((ns - t0) // 1000) for ns in ir_ns]
-        new, bad = drop_outliers([None if T is None or k in bridged else level @ T for k, T in enumerate(new)],
-                                 np.array(ir_ns))
-        cm, deg = moved(T_all, new)
-        if only_if_moved and cm < REFINE_CM and deg < REFINE_DEG:
-            return
-        T_all, main_map = new, main_map_new
-        version += 1
-        event = {"kind": kind, "version": version, "t_s": (ir_ns[-1] - t0) / 1e9, "wall": time.perf_counter(),
-                 "up_ir1": meta.get("up_ir1")}
-        out_q.put(("traj", version, T_all, event))
-        print(f"[tracker] {kind} at {event['t_s']:.1f}s: trajectory v{version} ({len(by_us)} frames, "
-              f"{len(bad)} outliers, moved up to {cm:.1f} cm / {deg:.1f} deg)", flush=True)
-
-    def first_up():
-        """Up in the first tracked camera, for the recording's meta.json."""
-        T_first = next((T for T in T_all if T is not None), None)
-        if T_first is not None:
-            meta["up_ir1"] = (T_first[:3, :3].T @ [0.0, 0, 1]).tolist()
-
-    state, recheck, n, last_view, last_refine = slam.state(), None, 0, 0.0, time.perf_counter()
+    version, n, t0, t_prev, t_imu, last_view = 0, 0, None, None, None, 0.0
     rot = {"T": None, "t": None, "dps": 0.0}  # turning speed (deg/s, smoothed) for the window
-    t_prev, imu_ready = None, False
     while True:
         item, n_new = off.take(n)
         if item is None:
@@ -588,26 +424,18 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
             continue
         t0 = t if t0 is None else t0
         start = time.perf_counter()
-        imu_rows = None
-        if inertial:  # the IMU samples since the last tracked frame
-            with span("track/imu"):
-                imu_rows = imu.between(t - 33_000_000 if t_prev is None else t_prev, t).copy()
-            imu_rows[:, 0] = (imu_rows[:, 0] - t0) / 1e9
+        with span("track/imu"):
+            rows = imu.between(t - 50_000_000 if t_imu is None else t_imu, t + IMU_AHEAD_NS).copy()
+        if len(rows):
+            t_imu = int(rows[-1, 0])
+        rows[:, 0] = (rows[:, 0] - t0) / 1e9
         t_prev = t
-        # microseconds since the first frame: the trajectory's times map back to these exactly
-        with span("track/orbslam3"):
-            ok, T, imu_only, imu_init = slam.track(left, right, (t - t0) // 1000 * 1e-6, imu_rows)
+        T = vio.track((t - t0) / 1e9, left, right, rows)
         track_ms = (time.perf_counter() - start) * 1000
-        ir_ns.append(t)
-        new_state = slam.state()
-        in_main = main_map is None or new_state[2] == main_map
-        if inertial and not ok and not any(T is not None for T in T_all[-90:]) and len(ir_ns) % 90 == 0:
-            out_q.put(("note", "IMU mode: move the camera to start tracking"))
-        if imu_only:
-            bridged.add(len(ir_ns) - 1)
-        T_all.append(level @ T if ok and in_main and not imu_only else None)
-        out_q.put(("pose", t, T_all[-1], track_ms, (time.perf_counter() - wall) * 1000, skipped))
-        if ok:
+        out_q.put(("pose", t, T, track_ms, (time.perf_counter() - wall) * 1000, skipped))
+        if T is None and len(vio.t) == 90:
+            out_q.put(("note", "OpenVINS: hold the camera still, then move it to start tracking"))
+        if T is not None:
             if rot["T"] is not None and t > rot["t"]:
                 R = rot["T"][:3, :3].T @ T[:3, :3]
                 dps = np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))) / ((t - rot["t"]) / 1e9)
@@ -617,42 +445,29 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
             last_view = time.perf_counter()
             with span("track/to window"):
                 try:
-                    view_q.put_nowait(("cam", left, slam.keypoints(), T_all[-1], track_ms,
-                                       "imu" if imu_only else ok, rot["dps"]))
+                    view_q.put_nowait(("cam", left, vio.keypoints(), T, track_ms, T is not None, rot["dps"]))
                 except queue.Full:
                     pass
-        if imu_ready and not imu_init:
-            # ORB-SLAM3 dropped the map (too little motion after the IMU initialization)
-            imu_ready = False
-            correct("map reset (move the camera for the IMU)")
-        if imu_init and not imu_ready:
-            # ORB-SLAM3 has turned its world to gravity (Z up): use it as is
-            imu_ready, level = True, np.eye(4)
-            correct("IMU initialized")
-            first_up()
-        if releveled:
-            up, k = releveled.pop("up"), releveled.pop("frame")
-            T_k = next((T for T in T_all[k::-1] if T is not None), None)
-            if not imu_ready and T_k is not None:
-                level = rotation_to_z(T_k[:3, :3] @ up) @ level
-                correct("re-level (IMU)")
-                first_up()
-        if new_state != state:
-            names = ("loop / global BA", "map merge", "new map")
-            correct(", ".join(n_ for n_, a, b in zip(names, state, new_state) if a != b))
-            state, recheck = new_state, len(ir_ns) + 15  # the map may still be moving: look again
-        elif recheck is not None and len(ir_ns) >= recheck:
-            correct("after the change")
-            recheck = None
-        elif ok and time.perf_counter() - last_refine >= REFINE_S:
-            with span("track/refine"):
-                correct("refined (local BA)", only_if_moved=True)
-            last_refine = time.perf_counter()
-    if ir_ns:
-        correct("final")
+        changed = vio.changed()
+        if changed:
+            kind, T_all = changed
+            version += 1
+            T_first = next((X for X in T_all if X is not None), None)
+            up = (T_first[:3, :3].T @ [0.0, 0, 1]).tolist() if T_first is not None else None
+            event = {"kind": kind, "version": version, "t_s": (t - t0) / 1e9, "wall": time.perf_counter(),
+                     "up_ir1": up}
+            out_q.put(("traj", version, T_all, event))
+            print(f"[tracker] {kind} at {event['t_s']:.1f}s: trajectory v{version}", flush=True)
     stop.set()
     src.join()
-    slam.shutdown()
+    vio.finish()
+    changed = vio.changed(final=True)
+    if changed:  # the last keyframe's loop closure
+        version += 1
+        out_q.put(("traj", version, changed[1], {"kind": "final", "version": version,
+                                                  "t_s": (t_prev - t0) / 1e9 if t0 else 0.0,
+                                                  "wall": time.perf_counter(), "up_ir1": None}))
+    print(f"[tracker] OpenVINS + RTAB-Map: {vio.loops} loop closures, {vio.proximity} proximity links", flush=True)
     server.join(60)  # until the depth thread has got the end (None)
     out_q.put(("prof", summary()))
     out_q.put(("done",))

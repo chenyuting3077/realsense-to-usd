@@ -4,7 +4,7 @@
 
 手持 Intel RealSense D455 → 即時 3D 重建 → 3D Gaussian Splatting → 給 NVIDIA Isaac Sim 的 USD。
 
-- **即時**（`python main.py`）：ORB-SLAM3 雙目 + IMU 位姿、Fast-FoundationStereo 深度（TensorRT）、nvblox TSDF 預覽同時跑，
+- **即時**（`python main.py`）：OpenVINS 雙目 + IMU 位姿加 RTAB-Map 迴圈閉合、Fast-FoundationStereo 深度（TensorRT）、nvblox TSDF 預覽同時跑，
   視窗顯示地圖、追蹤中的影像、深度與狀態。按 Stop 後用存下的所有幀建距離加權的 TSDF mesh。
 - **離線**（`python -m gs.offline`）：這段錄影的幀（遮掉人：即時或在這裡做）→ TSDF mesh → FastGS 3DGS → `scene.usdc`
   （Z-up、公尺、已水平；高斯負責顯示，減面後的 mesh 當靜態碰撞體）。
@@ -41,7 +41,7 @@ Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的�
 ## 流程
 
 ```
-D455 ──► 追蹤 process：投射器關的 IR ──► ORB-SLAM3 雙目（+ IMU），30 Hz
+D455 ──► 追蹤 process：投射器關的 IR + IMU ──► OpenVINS，30 Hz；RTAB-Map 處理它的關鍵幀，2 Hz
      │                                       │ 位姿（迴環 → 用修正後的軌跡重建地圖）
      └─► 深度 thread：最新一組投射器開的 IR ──► FFS（TensorRT）──► 對齊到 color 的深度
                          遮掉人（DeepLabV3，TensorRT）──┤
@@ -55,7 +55,7 @@ Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（�
 
 ## 安裝
 
-見 [docs/install](docs/install/README.zh-TW.md)：conda 環境、nvblox、ORB-SLAM3 與 Python binding、Fast-FoundationStereo + TensorRT、
+見 [docs/install](docs/install/README.zh-TW.md)：conda 環境、nvblox、OpenVINS + RTAB-Map 與 Python binding、Fast-FoundationStereo + TensorRT、
 人物分割、FastGS。每個節點的速度、加速過程與精度：[docs/speed](docs/speed/README.zh-TW.md)；
 ORB-SLAM3 和 OpenVINS（+ RTAB-Map）、VINS-Fusion、cuVSLAM 在錄影上的比較：[docs/vslam](docs/vslam/README.zh-TW.md)。
 
@@ -67,11 +67,12 @@ python main.py -o output/live_room       # 按視窗的 Stop 或 Ctrl+C 結束
 python -m gs.offline output/live_room  # -> scene.usdc，或按視窗的 3DGS -> USD
 ```
 
-開始時先拿穩相機 1 秒（用 IMU 轉正），再開始移動。D455 要接 USB 3。
+開始時先拿穩相機，再開始移動：OpenVINS 在第一次移動時開始追蹤。D455 要接 USB 3。
 
 ## 參考文獻
 
-- [ORB-SLAM3](https://github.com/UZ-SLAMLab/ORB_SLAM3)
+- [OpenVINS](https://github.com/rpng/open_vins)
+- [RTAB-Map](https://github.com/introlab/rtabmap)
 - [Fast-FoundationStereo](https://github.com/NVlabs/Fast-FoundationStereo)
 - [nvblox](https://github.com/nvidia-isaac/nvblox)
 - [FastGS](https://github.com/fastgs/FastGS)

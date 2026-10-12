@@ -5,7 +5,7 @@ ahead on a thread pool). Writes left-IR poses as TUM files:
   cuvslam_slam.tum  every frame's pose on the final pose graph (get_all_slam_poses)
 and cuvslam.json: track() time per frame, frames without a pose, loop closures.
 
-    python docs/vslam/run_cuvslam.py output/live_x/rec output/vslam/live_x
+    python -m bench.vslam.run_cuvslam output/live_x/rec output/vslam/live_x
 """
 import argparse
 import json

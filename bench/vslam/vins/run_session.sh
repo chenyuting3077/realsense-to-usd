@@ -1,6 +1,6 @@
 #!/bin/bash
 # One recording through VINS-Fusion (stereo + IMU, real time) with loop_fusion. Runs inside the vins:noetic image,
-# see run.sh: /rec the session's rec/ (read only), /work output, /scripts docs/vslam (read only).
+# see run.sh: /rec the session's rec/ (read only), /work output, /scripts bench/vslam (read only).
 # /work gets: vins.tum (VIO, every frame), vins_loop_nodes.tum (keyframes on the final pose graph),
 # vins_loop.tum (every VIO pose with the graph's correction), logs.
 set -e

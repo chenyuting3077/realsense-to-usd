@@ -2,7 +2,7 @@
 plus the RMSE against ORB-SLAM3 over each session, up to --until-end s before its end (ORB-SLAM3 itself fails in
 the last seconds of the 250 s session).
 
-    python docs/vslam/summary.py output output/vslam
+    python -m bench.vslam.summary output output/vslam
 """
 import argparse
 import json
@@ -10,8 +10,8 @@ import os
 
 import numpy as np
 
-from compare_traj import umeyama
-from eval_revisits import load_traj
+from bench.vslam.compare_traj import umeyama
+from bench.vslam.eval_revisits import load_traj
 
 SESSIONS = ["live_20261012_152105", "live_20261012_160515", "live_20261012_171428", "live_20261012_182911",
             "live_20261012_184220"]

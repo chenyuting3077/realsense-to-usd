@@ -2,14 +2,14 @@
 
 [English](README.md)
 
-main.py 用 ORB-SLAM3（雙目 + IMU）追蹤。這裡用同樣的輸入比較另外四套常用的視覺（慣性）SLAM，
+用同樣的輸入比較 ORB-SLAM3 和另外四套常用的視覺（慣性）SLAM，
 **穩定性優先、精度其次**：5 段錄影的投射器關閉 IR 對（848x480、約 28 Hz）和 IMU（200 Hz），在 Jetson AGX Thor
 上離線 replay。沒有 ground truth：穩定性用錄影自己的 IMU 判斷，精度則和 ORB-SLAM3 比，以及看相機回到同一處時
 深度能不能對齊。
 
 | | 類型 | 迴圈閉合 | 執行方式 |
 |---|---|---|---|
-| ORB-SLAM3 | 特徵點 SLAM，雙目 + IMU | 有（地點辨識、全域 BA、地圖合併） | main.py 即時（存下的 `frames/poses.npy`） |
+| ORB-SLAM3 | 特徵點 SLAM，雙目 + IMU | 有（地點辨識、全域 BA、地圖合併） | 錄製當時即時跑的（`frames/poses.npy`） |
 | OpenVINS | MSCKF 濾波 VIO，雙目 + IMU | 無 | docker 內 ROS 2 Jazzy，即時 |
 | OpenVINS + RTAB-Map | RTAB-Map 的圖建在 OpenVINS 的里程計上，迴圈閉合用 IR 對（`stereo`）或彩色 + FFS 深度（`rgbd`） | 有 | docker 內 ROS 2 Jazzy，即時 |
 | VINS-Fusion | 最佳化式 VIO，雙目 + IMU；`vins_loop`：加 loop_fusion（4 自由度位姿圖） | 有 | docker 內 ROS 1 Noetic，即時 |
@@ -18,11 +18,11 @@ main.py 用 ORB-SLAM3（雙目 + IMU）追蹤。這裡用同樣的輸入比較�
 重現（錄影在 `output/live_*`，結果在 `output/vslam/`）：
 
 ```bash
-docker build -t ov-rtabmap:jazzy docs/vslam && docker build -t vins:noetic docs/vslam/vins
-docs/vslam/run_all.sh               # OpenVINS、+ RTAB-Map stereo / rgbd
-docs/vslam/run_all_cuvslam_vins.sh  # cuVSLAM（conda 環境 realsense-to-usd）、VINS-Fusion
-docs/vslam/score_all.sh             # 穩定性、和 ORB-SLAM3 比、重訪（ICP）、RTAB-Map 統計；NO_ICP=1 跳過 ICP
-python docs/vslam/summary.py output output/vslam
+docker build -t ov-rtabmap:jazzy bench/vslam && docker build -t vins:noetic bench/vslam/vins
+bench/vslam/run_all.sh              # OpenVINS、+ RTAB-Map stereo / rgbd
+bench/vslam/run_all_cuvslam_vins.sh # cuVSLAM（conda 環境 realsense-to-usd）、VINS-Fusion
+bench/vslam/score_all.sh            # 穩定性、和 ORB-SLAM3 比、重訪（ICP）、RTAB-Map 統計；NO_ICP=1 跳過 ICP
+python -m bench.vslam.summary output output/vslam
 ```
 
 ## 結果
@@ -72,7 +72,7 @@ python docs/vslam/summary.py output output/vslam
 
 | | 每張 | 備註 |
 |---|---:|---|
-| ORB-SLAM3 | 35 ms（p90 42） | main.py 即時；249 s 那段 6378 組 IR 中略過 760 組（忙不過來） |
+| ORB-SLAM3 | 35 ms（p90 42） | 即時；249 s 那段 6378 組 IR 中略過 760 組（忙不過來） |
 | OpenVINS | 14 ms（p90 19） | Thor CPU |
 | RTAB-Map | 每個節點 110–200 ms | 每秒 2 個節點，CPU |
 | VINS-Fusion | – | 即時；它每兩組 IR 處理一組（多執行緒模式） |
@@ -89,5 +89,14 @@ python docs/vslam/summary.py output output/vslam
   長錄影上有幫助（和 ORB-SLAM3 的差 14.0 → 9.5 cm）。
 - **ORB-SLAM3** 精度好，但追蹤一變難就會跳。
 - **cuVSLAM** 快得多，但在這份資料上最不穩（約 28 Hz、投射器交替的 IR）。
-- 對 main.py：維持 ORB-SLAM3，或為了穩定改用 OpenVINS + RTAB-Map。開頭可以沿用第一個位姿（那時相機靜止），
-  也可以加跳動偵測（IMU 靜止卻 > 2 m/s）從 ORB-SLAM3 切到 VIO。
+
+## main.py 的追蹤
+
+main.py 用原生編譯的 OpenVINS + RTAB-Map 追蹤（`recon/vio.py`、`recon/vio_py`）：上面的設定，RTAB-Map 在背景執行緒
+每 0.5 s 處理一個關鍵幀，OpenVINS 開始前的 IR（IMU 判定相機靜止）給它的第一個位姿。和 docker 版在同樣 5 段錄影上比
+（`python -m bench.vslam.run_native`）：
+
+| | 有位姿 | 跳動 | 靜止時最大 | 和 ORB-SLAM3，4 段短的 | 和 ORB-SLAM3，249 s（全段） |
+|---|---:|---:|---:|---:|---:|
+| docker OpenVINS + RTAB-Map stereo | 75% | 0 | 1.0 cm/s | 0.6–2.3 cm | 23.6 cm |
+| recon/vio.py | **91%** | 0 | 0.5 cm/s | 1.5–3.7 cm | 23.3 cm |

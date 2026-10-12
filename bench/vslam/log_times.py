@@ -3,7 +3,7 @@ odometry's position) in rtabmap_<mode>.db, its per-update time
 (rtab_<mode>.log: "RTAB-Map=0.0956s"), and OpenVINS' per-frame time (a log with verbosity INFO or DEBUG:
 "[TIME]: 0.0067 seconds total"), from a run_session.sh work dir.
 
-    python docs/vslam/log_times.py output/vslam/live_x [OpenVINS debug log]
+    python -m bench.vslam.log_times output/vslam/live_x [OpenVINS debug log]
 """
 import glob
 import os

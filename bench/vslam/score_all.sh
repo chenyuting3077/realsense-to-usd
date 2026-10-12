@@ -2,8 +2,8 @@
 # The README's tables from run_all.sh and run_all_cuvslam_vins.sh: stability (from the IMU), trajectories vs
 # ORB-SLAM3 (the live poses.npy), the revisit check and its noise floor (ICP: NO_ICP=1 skips it), RTAB-Map's
 # loop closures and per-update time. In the realsense-to-usd env.
-#   docs/vslam/score_all.sh [recordings dir, default output] [work dir, default output/vslam]
-HERE=$(cd "$(dirname "$0")" && pwd)
+#   bench/vslam/score_all.sh [recordings dir, default output] [work dir, default output/vslam]
+cd "$(dirname "$0")/../.."  # the repo root: python -m bench.vslam.*
 REC=${1:-output}
 WORK=${2:-output/vslam}
 for s in live_20261012_152105 live_20261012_160515 live_20261012_171428 live_20261012_182911 live_20261012_184220; do
@@ -17,14 +17,14 @@ for s in live_20261012_152105 live_20261012_160515 live_20261012_171428 live_202
     done
     echo "== $s"
     echo "-- stability"
-    python "$HERE/stability.py" "$REC/$s/rec" $T --json "$W/stability.json"
+    python -m bench.vslam.stability "$REC/$s/rec" $T --json "$W/stability.json"
     echo "-- vs ORB-SLAM3"
-    python "$HERE/compare_traj.py" "$F" "$W/traj.png" $T
+    python -m bench.vslam.compare_traj "$F" "$W/traj.png" $T
     if [ "$NO_ICP" != 1 ]; then
         echo "-- revisits (> 20 s apart)"
-        python "$HERE/eval_revisits.py" "$F" $T --json "$W/revisits.json"
+        python -m bench.vslam.eval_revisits "$F" $T --json "$W/revisits.json"
         echo "-- noise floor (0.1-0.5 s apart)"
-        python "$HERE/eval_revisits.py" "$F" $T --min-dt 0.1 --max-dt 0.5 --json "$W/floor.json"
+        python -m bench.vslam.eval_revisits "$F" $T --min-dt 0.1 --max-dt 0.5 --json "$W/floor.json"
     fi
-    python "$HERE/log_times.py" "$W"
+    python -m bench.vslam.log_times "$W"
 done

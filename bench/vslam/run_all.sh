@@ -1,6 +1,6 @@
 #!/bin/bash
 # Every session of the README's tables: OpenVINS, then RTAB-Map with stereo IR and with color + FFS depth.
-#   docs/vslam/run_all.sh [recordings dir, default output] [work dir, default output/vslam]
+#   bench/vslam/run_all.sh [recordings dir, default output] [work dir, default output/vslam]
 HERE=$(cd "$(dirname "$0")" && pwd)
 REC=${1:-output}
 WORK=${2:-output/vslam}

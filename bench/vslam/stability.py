@@ -6,7 +6,7 @@
              < 0.05 m/s^2), how fast the pose moves anyway (cm/s): drift and jitter at rest
 The camera's real motion is never that fast and never moves while the IMU is still, so all of it is error.
 
-    python docs/vslam/stability.py output/live_x/rec orb=output/live_x/frames/poses.npy ov=ov.tum ...
+    python -m bench.vslam.stability output/live_x/rec orb=output/live_x/frames/poses.npy ov=ov.tum ...
 """
 import argparse
 import json

@@ -1,7 +1,7 @@
 """Trajectories of one session side by side: each rigidly aligned (rotation + translation, no scale) to the
 first one over the frames both pose, top view and height, and how far apart they are after alignment.
 
-    python docs/vslam/compare_traj.py output/live_x/frames out.png orb=frames/poses.npy ov=ov.tum ...
+    python -m bench.vslam.compare_traj output/live_x/frames out.png orb=frames/poses.npy ov=ov.tum ...
 """
 import argparse
 import json
@@ -13,7 +13,7 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from eval_revisits import load_traj  # noqa: E402
+from bench.vslam.eval_revisits import load_traj  # noqa: E402
 
 
 def umeyama(A, B):

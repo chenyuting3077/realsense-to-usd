@@ -1,4 +1,5 @@
-"""Live reconstruction from a D455 (or a replayed rec/): ORB-SLAM3 stereo + IMU poses (own process),
+"""Live reconstruction from a D455 (or a replayed rec/): OpenVINS stereo + IMU poses with RTAB-Map's loop
+closures (own process),
 Fast-FoundationStereo depth with people masked out (thread), nvblox TSDF (main). A loop closure or
 another trajectory correction re-integrates every stored frame into a new map in the background,
 swapped in when it has caught up. At the end the final trajectory gives the final mesh
@@ -71,7 +72,7 @@ class Tracker(threading.Thread):
     """live_workers.track_process seen from here: ir_ns / T are the times and left-IR camera-to-world
     poses (None: not tracked) so far, `version` the number of trajectory corrections."""
 
-    def __init__(self, source, imu, view_q=None):
+    def __init__(self, source, view_q=None):
         super().__init__(daemon=True)
         self.ir_ns, self.T, self._ns = [], [], np.zeros(0, np.int64)
         self.version, self.finished = 0, False
@@ -80,14 +81,14 @@ class Tracker(threading.Thread):
         ctx = mp.get_context("spawn")
         self.ctrl_q, self.q, self.req_q, self.frames_q = ctx.Queue(), ctx.Queue(), ctx.Queue(), ctx.Queue()
         self.proc = ctx.Process(target=track_process, daemon=True,
-                                args=(source, imu, self.ctrl_q, self.q, self.req_q, self.frames_q, view_q))
+                                args=(source, self.ctrl_q, self.q, self.req_q, self.frames_q, view_q))
         self.proc.start()
         while True:
             try:
                 msg = self.q.get(timeout=1)
             except queue.Empty:
                 if not self.proc.is_alive():
-                    raise SystemExit("ORB-SLAM3 / the camera did not start")
+                    raise SystemExit("the tracker (OpenVINS) / the camera did not start")
                 continue
             if msg[0] == "ready":
                 break
@@ -134,14 +135,17 @@ class Tracker(threading.Thread):
         return self.ir_ns[-1] if self.ir_ns else -1
 
     def pose(self, t_ns, table=None):
-        """Left-IR camera-to-world at t_ns (from `table`, default the latest trajectory), or None."""
+        """Left-IR camera-to-world at t_ns (from `table`, default the latest trajectory), or None. Past
+        the end of an older table (a rebuild's), frames tracked since: from the latest trajectory."""
         table = self.T if table is None else table
-        n = min(len(table), len(self.ir_ns))
-        if len(self._ns) != n:
-            self._ns = np.array(self.ir_ns[:n], np.int64)
+        if len(self._ns) != len(self.ir_ns):
+            self._ns = np.array(self.ir_ns, np.int64)
+        n = min(len(table), len(self._ns))
         if n == 0:
             return None
-        j = int(np.searchsorted(self._ns, t_ns))
+        if table is not self.T and n < len(self._ns) and t_ns > self._ns[n - 1]:
+            return self.pose(t_ns)
+        j = int(np.searchsorted(self._ns[:n], t_ns))
         a, b = max(j - 1, 0), min(j, n - 1)
         return interpolate([table[a], table[b]], self._ns[[a, b]], [t_ns])[0]
 
@@ -295,7 +299,6 @@ def main():
                    help="alternate: dots on every other frameset for depth, the others tracked at 30 Hz; "
                         "off: every frameset tracked at 60 Hz and used for depth")
     p.add_argument("--no-record", dest="record", action="store_false", help="do not save rec/")
-    p.add_argument("--no-imu", dest="imu", action="store_false", help="track with the cameras only")
     p.add_argument("--no-view", dest="view", action="store_false", help="no window")
     args = p.parse_args()
     if args.view and "DISPLAY" not in os.environ:  # started over ssh: the window on the desktop
@@ -352,7 +355,7 @@ def run_session(args, out, ui):
     rec_dir = os.path.join(out, "rec") if camera and args.record else None
     source = ("camera", args.duration, rec_dir, args.projector) if camera else ("replay", args.frames)
     map_q, cam_q, ui_q, viewer = ui["map_q"], ui["cam_q"], ui["ui_q"], ui["viewer"]
-    tracker = Tracker(source, args.imu, cam_q)
+    tracker = Tracker(source, cam_q)
     meta = tracker.meta
     st = meta["stereo"]
     if "ffs" not in ui:  # loaded once for every session
@@ -455,7 +458,7 @@ def run_session(args, out, ui):
                 with span("map/wait pose"):
                     while not tracker.finished and tracker.last_ns() < t_ns:
                         if not tracker.alive():
-                            raise SystemExit("ORB-SLAM3 process died")
+                            raise SystemExit("the tracker process (OpenVINS) died")
                         time.sleep(0.001)  # the IR pair after this frame is not tracked yet
                 T = color_pose(t_ns)
                 t = time.perf_counter()
@@ -468,7 +471,7 @@ def run_session(args, out, ui):
                 stored.append(item)
                 writer.add(item)
             elif busy:
-                if rebuild is None or rebuild["version"] != tracker.version:
+                if rebuild is None:  # a running one finishes first: the next starts on the latest trajectory
                     # Always a new map: nvblox's clear() leaves most blocks of a large map out of later meshes.
                     fl = floor.copy()
                     if any("re-level" in e["kind"] for e in tracker.events if e["version"] > built):
@@ -476,8 +479,7 @@ def run_session(args, out, ui):
                                   if active_table[k] is not None and tracker.T[k] is not None), None)
                         if k is not None:  # the world turned: move the floor estimate with it
                             fl = floor.moved(tracker.T[k] @ np.linalg.inv(active_table[k]))
-                    rebuild = {"map": make_mapper(), "floor": fl, "version": tracker.version, "table": tracker.T,
-                               "next": 0, "start": rebuild["start"] if rebuild else time.perf_counter()}
+                    rebuild = {"map": make_mapper(), "floor": fl, "version": tracker.version, "table": tracker.T, "next": 0}
                 for _ in range(REBUILD_CHUNK):
                     if rebuild["next"] >= len(stored):
                         break

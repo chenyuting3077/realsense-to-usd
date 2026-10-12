@@ -40,30 +40,19 @@ cmake --build ~/nvblox/build -j12
 `NVBLOX_FREE_SPACE_VOX` (limit how far free space is cleared), `add_color_frame(..., depth_frame)` (color fused with the aligned depth),
 `NVBLOX_STREAM_PRIORITY` (`main.py` runs integration ahead of FFS on the GPU).
 
-### ORB-SLAM3 and the Python binding
+### OpenVINS + RTAB-Map and the Python binding
 
 ```bash
-git clone -b v0.9.3 https://github.com/stevenlovegrove/Pangolin.git ~/Pangolin
-cmake -S ~/Pangolin -B ~/Pangolin/build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF \
-    -DBUILD_PANGOLIN_PYTHON=OFF -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$HOME/.local/pangolin
-cmake --build ~/Pangolin/build -j12 && cmake --install ~/Pangolin/build
-git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git ~/ORB_SLAM3 && git -C ~/ORB_SLAM3 checkout 4452a3c
-git -C ~/ORB_SLAM3 apply $PWD/patches/orbslam3-thor.patch
-(cd ~/ORB_SLAM3 && for d in Thirdparty/DBoW2 Thirdparty/g2o; do
-     cmake -S $d -B $d/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 && cmake --build $d/build -j12; done
- tar -xf Vocabulary/ORBvoc.txt.tar.gz -C Vocabulary
- cmake -B build -DCMAKE_BUILD_TYPE=Release -DPangolin_DIR=$HOME/.local/pangolin/lib/cmake/Pangolin
- cmake --build build -j8 --target ORB_SLAM3)
-
-cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DPython3_EXECUTABLE=$(which python) \
-    -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
-cmake --build recon/orbslam3_py/build -j8   # -> recon/orbslam3_py/orbslam3_py.cpython-312-*.so
+git clone --depth 1 --branch 2.2.0 https://github.com/ceres-solver/ceres-solver.git ~/ceres-2.2
+git clone https://github.com/rpng/open_vins.git ~/open_vins && git -C ~/open_vins checkout 6948812
+git clone --depth 1 --branch 0.23.13-jazzy https://github.com/introlab/rtabmap.git ~/rtabmap
+recon/vio_py/build_deps.sh   # Ceres, OpenVINS (no ROS), RTAB-Map's core -> ~/.local/{ceres,open_vins,rtabmap}
+recon/vio_py/build.sh        # -> recon/vio_py/vio_py.cpython-312-*.so
 ```
 
-The patch: C++17 (Pangolin 0.9), `mnFullBAIdx` as `int`, no segfault printing settings of a rectified stereo rig,
-`GetTracker()` / `GetAtlas()` accessors for the binding, stereo + IMU skips the IMU prediction for a frame without
-preintegration instead of dereferencing a null pointer, and the "not enough motion" map reset only for monocular.
-ORB-SLAM3, Fast-FoundationStereo and FastGS are expected in `~/`, as cloned here.
+All against the system's Eigen 3.4 and OpenCV 4.6 (conda's Ceres is built with Eigen 5). OpenVINS at master: v2.7 uses
+Ceres' `LocalParameterization`, gone in Ceres 2.2. The scripts hide a sourced ROS 2. OpenVINS (its `config/rs_d455`),
+Fast-FoundationStereo and FastGS are expected in `~/`, as cloned here.
 
 ### Fast-FoundationStereo + TensorRT
 
@@ -106,7 +95,7 @@ off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh), an
 sudo jetson_clocks   # GPU and memory clocks at max (otherwise the GPU idles down between FFS calls); again after every reboot
 ```
 
-`jetson_clocks` leaves the CPUs on `schedutil`; at their highest clock ORB-SLAM3 takes 22 instead of 32 ms a frame
+`jetson_clocks` leaves the CPUs on `schedutil`; at their highest clock the tracker and the mapper run faster
 ([docs/speed](../speed/README.md)). To set it at every boot:
 
 ```bash
