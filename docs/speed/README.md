@@ -135,7 +135,7 @@ In PyTorch both give FFS's volumes: (1) bit for bit, (2) up to rounding (3e-7 in
 at 848x480 (`bench.ffs.equal`: the engine alone with CUDA events, and |disparity difference| on 135 D455 pairs; each pair of rows
 measured in one session, as absolute times drift ~8% between sessions):
 
-| Engine (848x480) | Alone | |disparity difference| to the row above: median / p99 / max | ETH3D EPE |
+| Engine (848x480) | Alone | Absolute disparity difference to the row above: median / p99 / max | ETH3D EPE |
 |---|---:|---|---:|
 | FFS's volumes, TF32 | 127.2 ms | | 0.201 px |
 | (1), TF32 | 111.4 ms | 0.0033 / 1.26 / 132 px | 0.201 px |

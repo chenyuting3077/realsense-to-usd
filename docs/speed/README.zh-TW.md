@@ -129,7 +129,7 @@ engine 綁定輸入大小與 TensorRT 版本。
 build 成 848x480 的 engine（`bench.ffs.equal`：用 CUDA event 量 engine 單獨的時間、135 組 D455 的 |disparity 差|；每一對列都在同一時段量，
 因為不同時段的絕對時間會漂移約 8%）：
 
-| Engine（848x480） | 單獨 | 與上一列的 |disparity 差|：中位數 / p99 / 最大 | ETH3D EPE |
+| Engine（848x480） | 單獨 | 與上一列的 disparity 絕對差：中位數 / p99 / 最大 | ETH3D EPE |
 |---|---:|---|---:|
 | FFS 原本的 volume，TF32 | 127.2 ms | | 0.201 px |
 | (1)，TF32 | 111.4 ms | 0.0033 / 1.26 / 132 px | 0.201 px |
