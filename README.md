@@ -9,7 +9,17 @@ Hand-held Intel RealSense D455 → live 3D reconstruction → 3D Gaussian Splatt
 - **Offline** (`run_offline.sh`): the session's frames → TSDF mesh → FastGS 3DGS → `scene.usdc`
   (Z-up, meters, leveled; Gaussians for display, the decimated mesh as a static collider).
 
-Developed and tested on a Jetson AGX Thor (JetPack 7.1, CUDA 13).
+## Tested environment
+
+| Component | Version |
+|---|---|
+| Hardware | NVIDIA Jetson AGX Thor Developer Kit |
+| OS | Ubuntu 24.04.5 LTS (kernel 6.8.12-tegra) |
+| JetPack | 7.1 (L4T R38.4.0) |
+| CUDA | 13.0 |
+| Camera | Intel RealSense D455, firmware 5.17.3.10 |
+| Python | 3.12 (conda), PyTorch 2.9.1+cu130, TensorRT 11.3, Open3D 0.20.0, pyrealsense2 2.58.4 |
+
 Isaac Sim needs RTX ray-tracing hardware to render the result, so open the USD on an x86_64 + RTX machine.
 
 ## Example: a 3-minute loop around a lab

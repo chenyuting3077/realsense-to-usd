@@ -9,7 +9,17 @@
 - **離線**（`run_offline.sh`）：這段錄影的幀 → TSDF mesh → FastGS 3DGS → `scene.usdc`
   （Z-up、公尺、已水平；高斯負責顯示，減面後的 mesh 當靜態碰撞體）。
 
-在 Jetson AGX Thor（JetPack 7.1、CUDA 13）上開發與測試。
+## 測試環境
+
+| 項目 | 版本 |
+|---|---|
+| 硬體 | NVIDIA Jetson AGX Thor Developer Kit |
+| 作業系統 | Ubuntu 24.04.5 LTS（kernel 6.8.12-tegra） |
+| JetPack | 7.1（L4T R38.4.0） |
+| CUDA | 13.0 |
+| 相機 | Intel RealSense D455，韌體 5.17.3.10 |
+| Python | 3.12（conda）、PyTorch 2.9.1+cu130、TensorRT 11.3、Open3D 0.20.0、pyrealsense2 2.58.4 |
+
 Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的電腦上開。
 
 ## 範例：實驗室繞一圈 3 分鐘
