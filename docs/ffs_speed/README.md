@@ -35,6 +35,18 @@ one gives. 2 recordings, every 4th projector-on IR pair (480 pairs). Coverage / 
 
 The difference includes the noise of 848x480, max_disp 192 itself: it is not the error of the other setting alone.
 
+### In the live pipeline
+
+`python main.py output/live_20261012_171428/rec --no-view` (replay, 36.5 s, ~1000 IR pairs tracked), the depth
+thread with person segmentation, before and after the switch:
+
+| | Depth | Per depth frame (median / p90) | of it the person mask | Capture → map (median / p90) | Depth frames | Final mesh |
+|---|---:|---:|---:|---:|---:|---:|
+| 848x480 | 5.9 Hz | 159 / 171 ms | 8.6 ms | 215 / 383 ms | 214 | 451 k triangles |
+| **636x360** | **9.4 Hz** | **97 / 105 ms** | 8.5 ms | **150 / 270 ms** | **344** | 615 k triangles |
+
+The final mesh has more triangles from the 1.6× depth frames (more of the room seen often enough to pass the minimum weight).
+
 ## Conclusions
 
 - **max_disp 128**: 1.44× faster (10.1 fps), the same depth from 0.35 m on (median difference 0–10 mm up to 5 m, ETH3D
