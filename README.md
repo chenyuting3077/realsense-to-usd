@@ -56,6 +56,13 @@ conda activate realsense-to-usd
 
 Hold the camera still for a second at the start (leveling with the IMU), then move it. Keep the D455 on USB 3.
 
+## References
+
+- [ORB-SLAM3](https://github.com/UZ-SLAMLab/ORB_SLAM3)
+- [Fast-FoundationStereo](https://github.com/NVlabs/Fast-FoundationStereo)
+- [nvblox](https://github.com/nvidia-isaac/nvblox)
+- [FastGS](https://github.com/fastgs/FastGS)
+
 ## Licenses
 
 GPL-3.0. Since the pipeline includes Inria 3DGS and NVIDIA Fast-FoundationStereo, it is for **non-commercial research only**.

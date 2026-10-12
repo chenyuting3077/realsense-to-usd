@@ -56,6 +56,13 @@ conda activate realsense-to-usd
 
 開始時先拿穩相機 1 秒（用 IMU 轉正），再開始移動。D455 要接 USB 3。
 
+## 參考文獻
+
+- [ORB-SLAM3](https://github.com/UZ-SLAMLab/ORB_SLAM3)
+- [Fast-FoundationStereo](https://github.com/NVlabs/Fast-FoundationStereo)
+- [nvblox](https://github.com/nvidia-isaac/nvblox)
+- [FastGS](https://github.com/fastgs/FastGS)
+
 ## 授權
 
 GPL-3.0。因為流程中含 Inria 3DGS 與 NVIDIA Fast-FoundationStereo，**僅限非商業研究使用**。
