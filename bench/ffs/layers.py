@@ -2,7 +2,7 @@
 trtexec is another version and cannot load the engine), layers grouped by the FFS module in their name.
 Each profiled run is synchronous per layer, so the total is above the normal call; the shares count.
 
-Usage: python -m bench.ffs_layers [engine]   (default: recon.ffs.ENGINE)
+Usage: python -m bench.ffs.layers [engine]   (default: recon.ffs.ENGINE)
 """
 import re
 import sys

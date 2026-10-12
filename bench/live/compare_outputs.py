@@ -7,7 +7,7 @@ docs/speed (a speed-up keeps the outputs within the spread of the baseline's own
   into A's world by the trajectory alignment (the world itself may shift between runs); triangles
 - depth: per pixel |difference| (mm) of frames/depth_ffs at the same timestamps, where both have depth
 
-Usage: python -m bench.compare_outputs <run A> <run B> [<run C> ...]   (every pair against A)
+Usage: python -m bench.live.compare_outputs <run A> <run B> [<run C> ...]   (every pair against A)
 """
 import json
 import os

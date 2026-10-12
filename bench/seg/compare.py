@@ -2,7 +2,7 @@
 agreement with DeepLabV3-ResNet50 PyTorch fp32 on every color frame of a session. Builds the
 MobileNetV3 comparison engine into output/seg/ the first time (~4 min).
 
-Usage: python -m bench.bench_seg output/live_room/frames
+Usage: python -m bench.seg.compare output/live_room/frames
 """
 import glob
 import os

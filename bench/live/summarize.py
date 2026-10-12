@@ -1,7 +1,7 @@
 """A profiled run (run_replay.sh) -> its stage table: live.json's stages (recon/prof.py) of the main
 process and the tracker, and the mean GPU load / clock, memory bandwidth and CPU load from tegrastats.
 
-Usage: python -m bench.summarize <out dir> [<out dir> ...]   (several: median of the runs)
+Usage: python -m bench.live.summarize <out dir> [<out dir> ...]   (several: median of the runs)
 """
 import json
 import os

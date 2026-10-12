@@ -3,7 +3,7 @@ disparity there. Against the max_disp 192 engine on D455 projector-on pairs (pix
 inside the right image in both, as DisparityToColorDepth keeps): what the 128 engine gives where the
 disparity is above 128, and how many good pixels a cut at a disparity threshold loses.
 
-Usage: python -m bench.near_limit <engine 192> <engine 128> <rec dir>[,<rec dir>] [every=4]
+Usage: python -m bench.ffs.near_limit <engine 192> <engine 128> <rec dir>[,<rec dir>] [every=4]
 """
 import glob
 import os
@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import torch
 
-from bench.ffs_accuracy import gray
+from bench.ffs.accuracy import gray
 from recon.ffs import FFS
 
 

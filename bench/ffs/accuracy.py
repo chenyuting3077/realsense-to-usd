@@ -4,7 +4,7 @@ ETH3D two-view (laser-scan ground truth, non-occluded pixels, each pair cut to a
 scored at full resolution), and on D455 recordings (every 4th projector-on IR pair, no ground truth)
 coverage / median / p90 |depth difference| against the first engine, by its depth.
 
-Usage: python -m bench.ffs_accuracy <rec dir>[,<rec dir>] <engine> <engine> ...
+Usage: python -m bench.ffs.accuracy <rec dir>[,<rec dir>] <engine> <engine> ...
 """
 import glob
 import json
@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 import torch
 
-from bench.ffs_equal import scale
+from bench.ffs.equal import scale
 from recon.ffs import FFS
 
 ETH3D = os.path.expanduser("~/datasets/eth3d")

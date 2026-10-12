@@ -19,21 +19,21 @@ baseline's own re-runs; the FFS setting was changed for accuracy with the time s
 ## Scripts
 
 ```bash
-bench/run_baseline.sh output/live_20261012_171428/rec output/prof/base 3     # 3 replays + stage table (tegrastats beside)
-bench/run_replay.sh output/live_20261012_171428/rec output/prof/nsys nsys      # one replay under nsys (PROFILE=1: NVTX ranges)
-bench/run_replay.sh output/live_20261012_171428/rec output/prof/view view      # with the window on the desktop
-python -m bench.compare_outputs output/prof/base_1 output/prof/base_2 ...      # accuracy of a run: ATE, depth, mesh Chamfer
-bench/ffs_settings.sh <rec>,<rec>        # FFS engines: latency, ETH3D, D455 depth (ffs_accuracy.py)
-python -m bench.ffs_equal <engine A> <engine B> <rec>                         # two engines: engine alone, |disparity difference|
-python -m bench.ffs_layers <engine>                                             # per-layer time of an engine
-python -m bench.near_limit <engine 192> <engine 128> <rec>,<rec>               # max_disp 128 below 0.32 m
-python -m bench.warp_equal <old ffs.py> <rec>                                   # DisparityToColorDepth against another version
-python -m bench.bench_seg output/live_20261012_160515/frames                    # person segmentation settings
+bench/live/run_baseline.sh output/live_20261012_171428/rec output/prof/base 3     # 3 replays + stage table (tegrastats beside)
+bench/live/run_replay.sh output/live_20261012_171428/rec output/prof/nsys nsys      # one replay under nsys (PROFILE=1: NVTX ranges)
+bench/live/run_replay.sh output/live_20261012_171428/rec output/prof/view view      # with the window on the desktop
+python -m bench.live.compare_outputs output/prof/base_1 output/prof/base_2 ...      # accuracy of a run: ATE, depth, mesh Chamfer
+bench/ffs/settings.sh <rec>,<rec>        # FFS engines: latency, ETH3D, D455 depth (accuracy.py)
+python -m bench.ffs.equal <engine A> <engine B> <rec>                         # two engines: engine alone, |disparity difference|
+python -m bench.ffs.layers <engine>                                             # per-layer time of an engine
+python -m bench.ffs.near_limit <engine 192> <engine 128> <rec>,<rec>               # max_disp 128 below 0.32 m
+python -m bench.ffs.warp_equal <old ffs.py> <rec>                                   # DisparityToColorDepth against another version
+python -m bench.seg.compare output/live_20261012_160515/frames                    # person segmentation settings
 ```
 
 The stages come from `recon/prof.py`: `with span("depth/ffs"):` blocks write their median / p90 to `live.json`
 (`stages`, and `tracker_stages` from the tracker process). The system `trtexec` is TensorRT 10.13 and cannot load the
-11.3 engines; `ffs_layers.py` uses TensorRT's per-layer profiler from Python instead.
+11.3 engines; `bench/ffs/layers.py` uses TensorRT's per-layer profiler from Python instead.
 
 ## The live pipeline, step by step
 
@@ -57,7 +57,7 @@ pass the mesh's minimum weight: more triangles in the final mesh.
 
 ### Accuracy
 
-`compare_outputs`: ATE of the trajectories, |depth difference| on the frames both runs stored, mesh Chamfer distance (B moved
+`bench.live.compare_outputs`: ATE of the trajectories, |depth difference| on the frames both runs stored, mesh Chamfer distance (B moved
 into A's world by the trajectory alignment). Each run picks other projector-on framesets (the newest one when the depth thread
 is free), so the meshes differ in coverage too; the spread of re-runs of the same code is the yardstick.
 
@@ -132,7 +132,7 @@ group-wise correlation as a BxGxCxDxHxW product (224 channels × 48 disparities 
    tensor cores), then the 48 diagonals picked by one Gather; 6× less data than the 6-D product.
 
 In PyTorch both give FFS's volumes: (1) bit for bit, (2) up to rounding (3e-7 in fp32, one fp16 step of 5e-4 in fp16). As engines
-at 848x480 (`ffs_equal`: the engine alone with CUDA events, and |disparity difference| on 135 D455 pairs; each pair of rows
+at 848x480 (`bench.ffs.equal`: the engine alone with CUDA events, and |disparity difference| on 135 D455 pairs; each pair of rows
 measured in one session, as absolute times drift ~8% between sessions):
 
 | Engine (848x480) | Alone | |disparity difference| to the row above: median / p99 / max | ETH3D EPE |
@@ -154,7 +154,7 @@ disparity, its updates and the sampling coordinates in fp32. Exported traced und
 ONNX and TensorRT keeps them. All of FFS in fp16 does not export (the sampling coordinates are fp32) and would not do: fp16 has
 a step of 0.125 px between 128 and 192 px, the size of the model's whole error, added up over 8 iterations.
 
-`ffs_settings.sh` (with the volumes of (1)). Latency: one 848x480 IR pair, the model call (downscaling, normalization, padding,
+`bench/ffs/settings.sh` (with the volumes of (1)). Latency: one 848x480 IR pair, the model call (downscaling, normalization, padding,
 inference, disparity back to 848x480), mean of 50 after 10 warm-up calls. ETH3D two-view: the 27 training pairs, each cut to an
 848x480 window (smaller ones whole), scored at full resolution on the non-occluded laser-scan ground truth; 636x360 runs on the
 downscaled pair, its disparity scaled back up. Est. error: the ETH3D EPE as a D455 depth error, z² / (fx · baseline) · EPE
@@ -183,7 +183,7 @@ pair). Coverage / median / p90 |depth difference|, which includes the noise of t
 - **636x360** loses with distance: ETH3D EPE +10%, on the D455 a median difference of 2.3 cm at 2–3 m, 5 cm at 3–4 m and
   8 cm at 4–5 m (p90 35–84 cm: edges and far, weak texture). It keeps the close range.
 - **max_disp 128** keeps the far range but not the close one ([below](#max_disp-128-does-not-suit-close-ups)).
-- **amp against TF32 at the same setting** (`ffs_accuracy <recs> <TF32 engine> <amp engine>`; D455 median / p90 against the TF32 one):
+- **amp against TF32 at the same setting** (`bench.ffs.accuracy <recs> <TF32 engine> <amp engine>`; D455 median / p90 against the TF32 one):
 
 | 848x480 | ETH3D EPE | bad-1 | bad-2 | 0.2–0.35 m | 0.35–1 m | 1–2 m | 2–3 m | 3–4 m | 4–5 m |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -194,7 +194,7 @@ pair). Coverage / median / p90 |depth difference|, which includes the noise of t
 
 amp is 1.6–1.8× faster for +0.3–0.8% ETH3D EPE and 0–2 mm (median) of depth. That is more than TensorRT's rounding (max_disp
 128: |disparity difference| 0.085 / 6.6 / 156 px, against 0.003 / 1.7 / 138 px for a rebuild), but a small change next to the
-input size. Why it is faster (`ffs_layers`), 848x480, max_disp 192:
+input size. Why it is faster (`bench.ffs.layers`), 848x480, max_disp 192:
 
 | | TF32, (1) | amp, (1) | amp, (1) + (2) |
 |---|---:|---:|---:|
@@ -213,7 +213,7 @@ The convolutions are 3–4× faster in fp16; with them faster, the fp32 correlat
 It would be faster still (55.6 ms with (1)), but it cannot match closer than fx · baseline / 128 = 0.32 m and still outputs a
 disparity there. In the two test recordings 38% of the pixels (whose match is inside the right image) are nearer than that;
 the 128 engine gives them 112–145 px (percentiles 10 / 90; 1 / 99: 29 / 170), overlapping the good pixels, so no threshold
-separates them (`near_limit`):
+separates them (`bench.ffs.near_limit`):
 
 | Cut at disparity > | Near pixels removed | Good pixels removed (all / those at 100–128 px) |
 |---:|---:|---:|
@@ -227,7 +227,7 @@ separates them (`near_limit`):
 
 ## Person segmentation
 
-`live_20261012_160515`: 148 color frames at 848x480, 131 with people (`bench_seg`). There is no ground truth: accuracy here is
+`live_20261012_160515`: 148 color frames at 848x480, 131 with people (`bench.seg.compare`). There is no ground truth: accuracy here is
 **agreement with DeepLabV3-ResNet50 in PyTorch fp32**, which shows whether a faster setting changes the output, not whether the
 model finds every person. Latency is one frame (normalization + model + person class), mean of 100 after 10 warm-up calls.
 
@@ -263,7 +263,7 @@ partly missed by the model): a larger `DILATE_PX` in `recon/person_mask.py` or a
 
 - **Warp without boolean indexing**: `DisparityToColorDepth` computes every pixel and scatters the invalid ones to a spare slot
   instead of `disp[ok]`, which waits for the GPU (holding the GIL) to learn the count. Identical depth on 108 of 108 frames
-  (`warp_equal`); 2.6 → 2.0 ms alone, 4.8 → 2.6 ms in the pipeline.
+  (`bench.ffs.warp_equal`); 2.6 → 2.0 ms alone, 4.8 → 2.6 ms in the pipeline.
 - **The next frameset asked for when FFS is done**: its transfer from the tracker process (~7 ms) runs during the warp and the
   segmentation. Asked any earlier, the frame would be older when FFS gets it.
 

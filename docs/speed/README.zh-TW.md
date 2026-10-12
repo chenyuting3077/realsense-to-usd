@@ -18,21 +18,21 @@
 ## 腳本
 
 ```bash
-bench/run_baseline.sh output/live_20261012_171428/rec output/prof/base 3     # 重播 3 次 + 各階段表（同時記 tegrastats）
-bench/run_replay.sh output/live_20261012_171428/rec output/prof/nsys nsys      # 在 nsys 下重播一次（PROFILE=1：NVTX range）
-bench/run_replay.sh output/live_20261012_171428/rec output/prof/view view      # 開著桌面上的視窗
-python -m bench.compare_outputs output/prof/base_1 output/prof/base_2 ...      # 一次重播的精度：ATE、深度、mesh Chamfer
-bench/ffs_settings.sh <rec>,<rec>        # FFS engine：延遲、ETH3D、D455 深度（ffs_accuracy.py）
-python -m bench.ffs_equal <engine A> <engine B> <rec>                         # 兩個 engine：engine 單獨的時間、|disparity 差|
-python -m bench.ffs_layers <engine>                                             # engine 的逐層時間
-python -m bench.near_limit <engine 192> <engine 128> <rec>,<rec>               # max_disp 128 在 0.32 m 以內
-python -m bench.warp_equal <舊 ffs.py> <rec>                                    # DisparityToColorDepth 與另一個版本比較
-python -m bench.bench_seg output/live_20261012_160515/frames                    # 人物分割的各種設定
+bench/live/run_baseline.sh output/live_20261012_171428/rec output/prof/base 3     # 重播 3 次 + 各階段表（同時記 tegrastats）
+bench/live/run_replay.sh output/live_20261012_171428/rec output/prof/nsys nsys      # 在 nsys 下重播一次（PROFILE=1：NVTX range）
+bench/live/run_replay.sh output/live_20261012_171428/rec output/prof/view view      # 開著桌面上的視窗
+python -m bench.live.compare_outputs output/prof/base_1 output/prof/base_2 ...      # 一次重播的精度：ATE、深度、mesh Chamfer
+bench/ffs/settings.sh <rec>,<rec>        # FFS engine：延遲、ETH3D、D455 深度（accuracy.py）
+python -m bench.ffs.equal <engine A> <engine B> <rec>                         # 兩個 engine：engine 單獨的時間、|disparity 差|
+python -m bench.ffs.layers <engine>                                             # engine 的逐層時間
+python -m bench.ffs.near_limit <engine 192> <engine 128> <rec>,<rec>               # max_disp 128 在 0.32 m 以內
+python -m bench.ffs.warp_equal <舊 ffs.py> <rec>                                    # DisparityToColorDepth 與另一個版本比較
+python -m bench.seg.compare output/live_20261012_160515/frames                    # 人物分割的各種設定
 ```
 
 各階段時間來自 `recon/prof.py`：`with span("depth/ffs"):` 區塊的中位數 / p90 寫進 `live.json`
 （`stages`，以及追蹤 process 的 `tracker_stages`）。系統的 `trtexec` 是 TensorRT 10.13，讀不了 11.3 的 engine；
-`ffs_layers.py` 改從 Python 用 TensorRT 的逐層 profiler。
+`bench/ffs/layers.py` 改從 Python 用 TensorRT 的逐層 profiler。
 
 ## Live pipeline 逐步
 
@@ -55,7 +55,7 @@ depth 幀越多，房間裡被看到足夠次數、通過 mesh 最小權重的�
 
 ### 精度
 
-`compare_outputs`：軌跡的 ATE、兩次都存下的幀的 |深度差|、mesh 的 Chamfer 距離（B 以軌跡對齊移到 A 的世界座標）。
+`bench.live.compare_outputs`：軌跡的 ATE、兩次都存下的幀的 |深度差|、mesh 的 Chamfer 距離（B 以軌跡對齊移到 A 的世界座標）。
 每次重播選到的 projector-on frameset 不同（depth 執行緒空下來時取最新的一組），mesh 的覆蓋範圍也不同；以同一份程式重跑的差異為準。
 
 | | ATE（rmse） | 深度（中位數 / p90 / p99） | Chamfer（平均 / p90） |
@@ -126,7 +126,7 @@ engine 綁定輸入大小與 TensorRT 版本。
    取出 48 條對角線；資料量是 6 維乘積的 1/6。
 
 在 PyTorch 中兩者都等於 FFS 的 volume：(1) 逐 bit 相同，(2) 只差捨入（fp32 下 3e-7，fp16 下一個 fp16 間距 5e-4）。
-build 成 848x480 的 engine（`ffs_equal`：用 CUDA event 量 engine 單獨的時間、135 組 D455 的 |disparity 差|；每一對列都在同一時段量，
+build 成 848x480 的 engine（`bench.ffs.equal`：用 CUDA event 量 engine 單獨的時間、135 組 D455 的 |disparity 差|；每一對列都在同一時段量，
 因為不同時段的絕對時間會漂移約 8%）：
 
 | Engine（848x480） | 單獨 | 與上一列的 |disparity 差|：中位數 / p99 / 最大 | ETH3D EPE |
@@ -147,7 +147,7 @@ FFS 有自己的 mixed precision（`args.mixed_precision`）：特徵、cost agg
 整個 FFS 都用 fp16 則匯不出來（取樣座標是 fp32），也不該這樣做：fp16 在 128–192 px 之間的間距是 0.125 px，
 和整個模型的誤差同一量級，8 次迭代還會累加。
 
-`ffs_settings.sh`（用 (1) 的 volume）。延遲：一組 848x480 IR 的模型呼叫（縮小、正規化、補邊、推論、disparity 放回 848x480），
+`bench/ffs/settings.sh`（用 (1) 的 volume）。延遲：一組 848x480 IR 的模型呼叫（縮小、正規化、補邊、推論、disparity 放回 848x480），
 熱機 10 次後 50 次的平均。ETH3D two-view：27 組訓練集，每組切成 848x480 的視窗（較小的整張），在全解析度以 non-occluded 的
 雷射掃描 ground truth 評分；636x360 在縮小的影像上跑，disparity 再放大回來。估計誤差：把 ETH3D EPE 換成 D455 的深度誤差，
 z² / (fx · baseline) · EPE，fx 430.6 px、baseline 95 mm（2.5 m 時每 px 0.15 m，4 m 時 0.39 m）；ETH3D 是可見光影像，
@@ -175,7 +175,7 @@ D455 沒有 ground truth：每個設定都對 848x480、max_disp 192、TF32 比�
 - **636x360** 距離越遠越不準：ETH3D EPE 多 10%；D455 上的差異中位數 2–3 m 是 2.3 cm、3–4 m 是 5 cm、4–5 m 是 8 cm
   （p90 35–84 cm：邊緣與遠處、紋理弱的地方）。近距離沒有損失。
 - **max_disp 128** 保住遠處，但近距離不行（見「max_disp 128 不適合近拍」）。
-- **amp 與同設定的 TF32 比**（`ffs_accuracy <recs> <TF32 engine> <amp engine>`；D455 中位數 / p90，對 TF32 那個）：
+- **amp 與同設定的 TF32 比**（`bench.ffs.accuracy <recs> <TF32 engine> <amp engine>`；D455 中位數 / p90，對 TF32 那個）：
 
 | 848x480 | ETH3D EPE | bad-1 | bad-2 | 0.2–0.35 m | 0.35–1 m | 1–2 m | 2–3 m | 3–4 m | 4–5 m |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -185,7 +185,7 @@ D455 沒有 ground truth：每個設定都對 848x480、max_disp 192、TF32 比�
 | max_disp 128、amp | 0.2031 px | 1.610% | 0.644% | 1 / 4 mm | 0 / 10 mm | 0 / 6 mm | 1 / 8 mm | 2 / 16 mm | 2 / 14 mm |
 
 amp 快 1.6–1.8 倍，代價是 ETH3D EPE +0.3–0.8%、深度中位數 0–2 mm。這比 TensorRT 的捨入大（max_disp 128：|disparity 差|
-0.085 / 6.6 / 156 px，重 build 一次是 0.003 / 1.7 / 138 px），但和輸入尺寸造成的差異相比很小。為什麼快（`ffs_layers`），
+0.085 / 6.6 / 156 px，重 build 一次是 0.003 / 1.7 / 138 px），但和輸入尺寸造成的差異相比很小。為什麼快（`bench.ffs.layers`），
 848x480、max_disp 192：
 
 | | TF32、(1) | amp、(1) | amp、(1) + (2) |
@@ -204,7 +204,7 @@ amp 快 1.6–1.8 倍，代價是 ETH3D EPE +0.3–0.8%、深度中位數 0–2 
 
 它還能更快（(1) 時 55.6 ms），但比 fx · baseline / 128 = 0.32 m 近就匹配不到，而且仍會輸出 disparity。兩段測試錄影中，
 38% 的像素（匹配點在右影像內）比這還近；128 engine 對它們給出 112–145 px（第 10 / 90 百分位；第 1 / 99：29 / 170），
-和正確像素重疊，沒有門檻能分開（`near_limit`）：
+和正確像素重疊，沒有門檻能分開（`bench.ffs.near_limit`）：
 
 | 切掉 disparity > | 去掉的近距離像素 | 去掉的正確像素（全部 / 100–128 px 的） |
 |---:|---:|---:|
@@ -218,7 +218,7 @@ amp 快 1.6–1.8 倍，代價是 ETH3D EPE +0.3–0.8%、深度中位數 0–2 
 
 ## 人物分割
 
-`live_20261012_160515`：148 張 848x480 color，131 張有人（`bench_seg`）。沒有 ground truth：這裡的精度是
+`live_20261012_160515`：148 張 848x480 color，131 張有人（`bench.seg.compare`）。沒有 ground truth：這裡的精度是
 **和 PyTorch fp32 的 DeepLabV3-ResNet50 一不一致**，看的是加速設定會不會改變輸出，不是模型能不能找到每一個人。
 延遲是一張（正規化 + 模型 + 取人的類別），熱機 10 次後 100 次的平均。
 
@@ -252,7 +252,7 @@ stream（`main.py` 的 `Depth`），它就能填 FFS 的空檔：有它 FFS 70.9
 `main.py`、`recon/ffs.py`：
 
 - **warp 不用 boolean indexing**：`DisparityToColorDepth` 改成每個像素都算、無效的 scatter 到一個多出來的位置，不用 `disp[ok]`
-  （它要等 GPU 算出個數，而且等的時候拿著 GIL）。108 幀中 108 幀深度完全相同（`warp_equal`）；單獨 2.6 → 2.0 ms，pipeline 中 4.8 → 2.6 ms。
+  （它要等 GPU 算出個數，而且等的時候拿著 GIL）。108 幀中 108 幀深度完全相同（`bench.ffs.warp_equal`）；單獨 2.6 → 2.0 ms，pipeline 中 4.8 → 2.6 ms。
 - **FFS 一跑完就要下一組 frameset**：從追蹤 process 傳過來（約 7 ms）跟 warp、分割重疊。再更早要的話，FFS 拿到時那幀就更舊。
 
 ## CPU governor
