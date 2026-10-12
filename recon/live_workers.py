@@ -19,6 +19,9 @@ from frames import interpolate
 
 ORB_ROOT = os.path.expanduser("~/ORB_SLAM3")
 OUTLIER_CM = 5.0  # IR poses this far from the median of their 7 neighbours are interpolated
+# Every REFINE_S the trajectory is re-read: local BA (and the IMU's VIBA) keep moving the keyframes,
+# a frame's pose from track() does not follow. A move past REFINE_CM / REFINE_DEG rebuilds the map.
+REFINE_S, REFINE_CM, REFINE_DEG = 2.0, 2.0, 1.0
 # 848x480 at 60 fps; color exposure, gain and white balance fixed. The IR exposure is short
 # (less blur when turning) with the gain set by IrExposure.
 CAMERA = {"width": 848, "height": 480, "fps": 60, "ir_exposure_ms": 4, "ir_exposure_max_ms": 8,
@@ -284,6 +287,17 @@ def level_transform(up):
     return T
 
 
+def moved(old, new):
+    """Largest translation (cm) and rotation (deg) between two trajectories, over frames in both."""
+    both = [(A, B) for A, B in zip(old, new) if A is not None and B is not None]
+    if not both:
+        return 0.0, 0.0
+    A, B = (np.stack(x) for x in zip(*both))
+    cm = 100 * np.linalg.norm(A[:, :3, 3] - B[:, :3, 3], axis=1).max()
+    cos = (np.einsum("nij,nij->n", A[:, :3, :3], B[:, :3, :3]) - 1) / 2  # trace(Ra^T Rb)
+    return float(cm), float(np.degrees(np.arccos(np.clip(cos, -1, 1))).max())
+
+
 def drop_outliers(track, t_ns):
     """Poses more than OUTLIER_CM from the median of their 7 neighbours are interpolated from the
     others: frames tracked during a loop correction can refer to not yet corrected keyframes."""
@@ -528,22 +542,27 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
     if pipe:
         threading.Timer(0.5, ctrl_q.put, (("level", 30),)).start()
 
-    def correct(kind):
+    def correct(kind, only_if_moved=False):
         """Re-read the trajectory, keeping the map with the most frames (after tracking is lost,
-        ORB-SLAM3 starts a new map in a frame of its own until it merges the two)."""
+        ORB-SLAM3 starts a new map in a frame of its own until it merges the two). only_if_moved:
+        only when a frame moved past REFINE_CM / REFINE_DEG from the poses sent so far."""
         nonlocal T_all, version, main_map
         t, P, maps = slam.trajectory()
-        main_map = int(np.bincount(maps).argmax()) if len(maps) else slam.state()[2]
-        by_us = {int(round(x * 1e6)): T for x, T, m in zip(t, P, maps) if m == main_map}
+        main_map_new = int(np.bincount(maps).argmax()) if len(maps) else slam.state()[2]
+        by_us = {int(round(x * 1e6)): T for x, T, m in zip(t, P, maps) if m == main_map_new}
         new = [by_us.get((ns - t0) // 1000) for ns in ir_ns]
-        T_all, bad = drop_outliers([None if T is None or k in bridged else level @ T for k, T in enumerate(new)],
-                                   np.array(ir_ns))
+        new, bad = drop_outliers([None if T is None or k in bridged else level @ T for k, T in enumerate(new)],
+                                 np.array(ir_ns))
+        cm, deg = moved(T_all, new)
+        if only_if_moved and cm < REFINE_CM and deg < REFINE_DEG:
+            return
+        T_all, main_map = new, main_map_new
         version += 1
         event = {"kind": kind, "version": version, "t_s": (ir_ns[-1] - t0) / 1e9, "wall": time.perf_counter(),
                  "up_ir1": meta.get("up_ir1")}
         out_q.put(("traj", version, T_all, event))
         print(f"[tracker] {kind} at {event['t_s']:.1f}s: trajectory v{version} ({len(by_us)} frames, "
-              f"{len(bad)} outliers)", flush=True)
+              f"{len(bad)} outliers, moved up to {cm:.1f} cm / {deg:.1f} deg)", flush=True)
 
     def first_up():
         """Up in the first tracked camera, for the recording's meta.json."""
@@ -551,7 +570,7 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
         if T_first is not None:
             meta["up_ir1"] = (T_first[:3, :3].T @ [0.0, 0, 1]).tolist()
 
-    state, recheck, n, last_view = slam.state(), None, 0, 0.0
+    state, recheck, n, last_view, last_refine = slam.state(), None, 0, 0.0, time.perf_counter()
     rot = {"T": None, "t": None, "dps": 0.0}  # turning speed (deg/s, smoothed) for the window
     t_prev, imu_ready = None, False
     while True:
@@ -617,6 +636,9 @@ def track_process(source, inertial, ctrl_q, out_q, req_q, frames_q, view_q=None)
         elif recheck is not None and len(ir_ns) >= recheck:
             correct("after the change")
             recheck = None
+        elif ok and time.perf_counter() - last_refine >= REFINE_S:
+            correct("refined (local BA)", only_if_moved=True)
+            last_refine = time.perf_counter()
     if ir_ns:
         correct("final")
     stop.set()
