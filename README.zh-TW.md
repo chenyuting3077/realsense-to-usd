@@ -9,10 +9,8 @@
 - **離線**（`run_offline.sh`）：這段錄影的幀 → TSDF mesh → FastGS 3DGS → `scene.usdc`
   （Z-up、公尺、已水平；高斯負責顯示，減面後的 mesh 當靜態碰撞體）。
 
-在 Jetson AGX Thor（JetPack 7.1、CUDA 13）上開發與測試，x86_64 + NVIDIA RTX GPU 也能跑。
+在 Jetson AGX Thor（JetPack 7.1、CUDA 13）上開發與測試。
 Isaac Sim 算圖需要 RTX 的 ray tracing 硬體，USD 要在 x86_64 + RTX 的電腦上開。
-
-![錄影中的四幀](docs/frames.jpg)
 
 ## 範例：實驗室繞一圈 3 分鐘
 
@@ -48,110 +46,9 @@ Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（�
 run_offline.sh：frames/ ──► TSDF + 點雲 ──► COLMAP text ──► FastGS ──► scene.usdc
 ```
 
-| 路徑 | 內容 |
-|---|---|
-| `run_live.sh` | D455 即時錄影（預設 `--projector alternate --imu`，其餘參數傳給 `recon/live.py`） |
-| `run_offline.sh` | 一段錄影 → `recon/`、`colmap/`、`fastgs/`、`scene.usdc` |
-| `recon/live.py` | 即時重建（D455，或重播錄下的 `rec/`） |
-| `recon/live_workers.py` | D455 擷取、IR 曝光控制、IMU、存檔、ORB-SLAM3 追蹤 process |
-| `recon/live_view.py` | 視窗（Open3D GUI） |
-| `recon/orbslam3_py/` | 追蹤用的 ORB-SLAM3 pybind11 binding |
-| `recon/ffs.py`、`recon/export_ffs_trt.py` | Fast-FoundationStereo 推論 / 匯出 TensorRT 引擎 |
-| `recon/stereo_depth.py` | 離線 FFS 深度；視差 → color 相機深度的轉換即時版也用 |
-| `recon/reconstruct.py` | Open3D TSDF，以及最終 mesh 用的距離加權 TSDF（Triton） |
-| `recon/reconstruct_nvblox.py` | nvblox TSDF（即時預覽，也可離線） |
-| `recon/track_orbslam3.py` | 錄下的 `rec/` 離線跑 ORB-SLAM3 位姿 |
-| `gs/export_colmap.py`、`gs/train_fastgs.sh` | 用已知位姿匯出 COLMAP 格式、FastGS 訓練與評分 |
-| `gs/export_usd.py` | mesh + 3DGS → USD |
-| `patches/` | nvblox、ORB-SLAM3、FastGS 的修正（見下方） |
-| `frames.py` | 幀資料夾讀寫、深度濾波、位姿工具 |
-
 ## 安裝
 
-全部在同一個 conda 環境裡跑（預設名稱 `realsense-to-usd`，用別的名稱時設 `RS2USD_ENV`）。
-`source env.sh` 會啟用環境、把 `CUDA_HOME` 指到環境裡 pip 安裝的 CUDA 13 toolkit，並把 repo 根目錄加進 `PYTHONPATH`。
-所有指令都在 repo 根目錄執行。
-
-```bash
-conda create -n realsense-to-usd python=3.12 "numpy>=2" imageio matplotlib pip
-source env.sh
-pip install torch==2.9.1+cu130 torchvision --index-url https://download.pytorch.org/whl/cu130/
-pip install "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-cccl==13.0.*" "nvidia-cuda-crt==13.0.*" \
-    "nvidia-nvvm==13.0.*" "nvidia-npp==13.*" ninja open3d==0.20.0 pyrealsense2 opencv-python-headless \
-    scipy plyfile pybind11
-C=$CUDA_HOME && ln -sf lib $C/lib64 && ln -sf libcudart.so.13 $C/lib/libcudart.so
-conda install -c conda-forge openusd=26.03   # 匯出 USD（PyPI 的 usd-core 沒有 aarch64 版）
-```
-
-`nvidia-nvvm` 一定要固定在 13.0，新版產生的 PTX ptxas 不支援（`Unsupported .version`）。
-
-### nvblox
-
-套用 `patches/nvblox-thor.patch` 後從原始碼編譯（`live.py` 用到 patch 改過的 `add_color_frame`，官方 wheel 不能用）。
-x86_64 上把 `CMAKE_CUDA_ARCHITECTURES` 改成自己的 GPU（例如 `89`），`CMAKE_CUDA_COMPILER` 指到 CUDA 13 的 `nvcc`。
-
-```bash
-git clone --branch v0.0.10 https://github.com/nvidia-isaac/nvblox.git ~/nvblox
-git -C ~/nvblox apply $PWD/patches/nvblox-thor.patch
-cmake -S ~/nvblox -B ~/nvblox/build -DCMAKE_BUILD_TYPE=Release -DBUILD_RENDERER=0 -DBUILD_TESTING=0 \
-    -DCMAKE_CUDA_ARCHITECTURES=110 -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
-    -DTorch_DIR=$(python -c "import torch,os; print(os.path.dirname(torch.__file__))")/share/cmake/Torch \
-    -DPython3_EXECUTABLE=$(which python)
-cmake --build ~/nvblox/build -j12
-(cd ~/nvblox/nvblox_torch && CUDA_VERSION=13.0 pip install --no-build-isolation --editable .)
-```
-
-`BUILD_RENDERER=0`：renderer 需要 Vulkan SDK，重建用不到。patch 內容：sm_110 的 CUDA 架構轉換、`numpy>=2` / `opencv-python-headless`
-取代原本鎖定的版本、`NVBLOX_FREE_SPACE_VOX`（限制 free space 清除的距離）、`add_color_frame(..., depth_frame)`（用對齊的深度融合顏色）、
-`NVBLOX_STREAM_PRIORITY`（`live.py` 讓融合在 GPU 上排在 FFS 前面）。
-
-### ORB-SLAM3 與 Python binding
-
-```bash
-git clone -b v0.9.3 https://github.com/stevenlovegrove/Pangolin.git ~/Pangolin
-cmake -S ~/Pangolin -B ~/Pangolin/build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=OFF \
-    -DBUILD_PANGOLIN_PYTHON=OFF -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$HOME/.local/pangolin
-cmake --build ~/Pangolin/build -j12 && cmake --install ~/Pangolin/build
-git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git ~/ORB_SLAM3 && git -C ~/ORB_SLAM3 checkout 4452a3c
-git -C ~/ORB_SLAM3 apply $PWD/patches/orbslam3-thor.patch
-(cd ~/ORB_SLAM3 && for d in Thirdparty/DBoW2 Thirdparty/g2o; do
-     cmake -S $d -B $d/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 && cmake --build $d/build -j12; done
- tar -xf Vocabulary/ORBvoc.txt.tar.gz -C Vocabulary
- cmake -B build -DCMAKE_BUILD_TYPE=Release -DPangolin_DIR=$HOME/.local/pangolin/lib/cmake/Pangolin
- cmake --build build -j8 --target ORB_SLAM3 stereo_euroc)
-
-cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DPython3_EXECUTABLE=$(which python) \
-    -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
-cmake --build recon/orbslam3_py/build -j8   # -> recon/orbslam3_py/orbslam3_py.cpython-312-*.so
-```
-
-patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rectified 雙目印設定時不再 segfault、`stereo_euroc` 不開視窗、
-給 binding 用的 `GetTracker()` / `GetAtlas()`、雙目 + IMU 遇到沒有預積分的幀時跳過 IMU 預測（原本解參考空指標）、
-「Not enough motion」的地圖重置只用在單眼。ORB-SLAM3 不在 `~/ORB_SLAM3` 時用 `--orb-root` 與 CMake 變數 `ORB_SLAM3_ROOT` 指定。
-
-### Fast-FoundationStereo + TensorRT
-
-```bash
-git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
-python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
-pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python recon/export_ffs_trt.py -o output/ffs --width 864   # live.py 要的 848x480 引擎（約 5 分鐘）
-```
-
-TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。
-
-### FastGS
-
-```bash
-git clone https://github.com/fastgs/FastGS.git ~/FastGS
-git -C ~/FastGS apply $PWD/patches/fastgs-thor.patch
-pip install websockets lpips
-pip install --no-build-isolation ~/FastGS/submodules/simple-knn ~/FastGS/submodules/fused-ssim \
-    ~/FastGS/submodules/diff-gaussian-rasterization_fastgs
-```
-
-不在 `~/FastGS` 時設 `FASTGS_ROOT`。patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中途 `cudaErrorIllegalAddress`）、
-投影矩陣支援偏離中心的主點（D455 color 的主點偏好幾個 px，不修正時高斯和 TSDF mesh 差約 9 mm）。
+見 [INSTALL.zh-TW.md](INSTALL.zh-TW.md)：conda 環境、nvblox、ORB-SLAM3 與 Python binding、Fast-FoundationStereo + TensorRT、FastGS。
 
 ## 使用
 
