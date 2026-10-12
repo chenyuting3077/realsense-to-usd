@@ -53,16 +53,17 @@ git -C ~/ORB_SLAM3 apply $PWD/patches/orbslam3-thor.patch
      cmake -S $d -B $d/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 && cmake --build $d/build -j12; done
  tar -xf Vocabulary/ORBvoc.txt.tar.gz -C Vocabulary
  cmake -B build -DCMAKE_BUILD_TYPE=Release -DPangolin_DIR=$HOME/.local/pangolin/lib/cmake/Pangolin
- cmake --build build -j8 --target ORB_SLAM3 stereo_euroc)
+ cmake --build build -j8 --target ORB_SLAM3)
 
 cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DPython3_EXECUTABLE=$(which python) \
     -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
 cmake --build recon/orbslam3_py/build -j8   # -> recon/orbslam3_py/orbslam3_py.cpython-312-*.so
 ```
 
-patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rectified 雙目印設定時不再 segfault、`stereo_euroc` 不開視窗、
+patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rectified 雙目印設定時不再 segfault、
 給 binding 用的 `GetTracker()` / `GetAtlas()`、雙目 + IMU 遇到沒有預積分的幀時跳過 IMU 預測（原本解參考空指標）、
-「Not enough motion」的地圖重置只用在單眼。ORB-SLAM3 不在 `~/ORB_SLAM3` 時用 `--orb-root` 與 CMake 變數 `ORB_SLAM3_ROOT` 指定。
+「Not enough motion」的地圖重置只用在單眼。
+ORB-SLAM3、Fast-FoundationStereo、FastGS 都要照這裡的指令放在 `~/`。
 
 ### Fast-FoundationStereo + TensorRT
 
@@ -70,7 +71,7 @@ patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rec
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python recon/export_ffs_trt.py -o output/ffs --width 864   # live.py 要的 848x480 引擎（約 5 分鐘）
+python recon/export_ffs_trt.py   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine（約 5 分鐘）
 ```
 
 TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。
@@ -85,7 +86,7 @@ pip install --no-build-isolation ~/FastGS/submodules/simple-knn ~/FastGS/submodu
     ~/FastGS/submodules/diff-gaussian-rasterization_fastgs
 ```
 
-不在 `~/FastGS` 時設 `FASTGS_ROOT`。patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中途 `cudaErrorIllegalAddress`）、
+patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中途 `cudaErrorIllegalAddress`）、
 投影矩陣支援偏離中心的主點（D455 color 的主點偏好幾個 px，不修正時高斯和 TSDF mesh 差約 9 mm）。
 
 ### Jetson

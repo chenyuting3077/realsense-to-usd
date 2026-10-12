@@ -53,17 +53,17 @@ git -C ~/ORB_SLAM3 apply $PWD/patches/orbslam3-thor.patch
      cmake -S $d -B $d/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 && cmake --build $d/build -j12; done
  tar -xf Vocabulary/ORBvoc.txt.tar.gz -C Vocabulary
  cmake -B build -DCMAKE_BUILD_TYPE=Release -DPangolin_DIR=$HOME/.local/pangolin/lib/cmake/Pangolin
- cmake --build build -j8 --target ORB_SLAM3 stereo_euroc)
+ cmake --build build -j8 --target ORB_SLAM3)
 
 cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DPython3_EXECUTABLE=$(which python) \
     -Dpybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
 cmake --build recon/orbslam3_py/build -j8   # -> recon/orbslam3_py/orbslam3_py.cpython-312-*.so
 ```
 
-The patch: C++17 (Pangolin 0.9), `mnFullBAIdx` as `int`, no segfault printing settings of a rectified stereo rig, no viewer in
-`stereo_euroc`, `GetTracker()` / `GetAtlas()` accessors for the binding, stereo + IMU skips the IMU prediction for a frame without
+The patch: C++17 (Pangolin 0.9), `mnFullBAIdx` as `int`, no segfault printing settings of a rectified stereo rig,
+`GetTracker()` / `GetAtlas()` accessors for the binding, stereo + IMU skips the IMU prediction for a frame without
 preintegration instead of dereferencing a null pointer, and the "not enough motion" map reset only for monocular.
-`--orb-root` (default `~/ORB_SLAM3`) and the CMake variable `ORB_SLAM3_ROOT` point elsewhere if needed.
+ORB-SLAM3, Fast-FoundationStereo and FastGS are expected in `~/`, as cloned here.
 
 ### Fast-FoundationStereo + TensorRT
 
@@ -71,7 +71,7 @@ preintegration instead of dereferencing a null pointer, and the "not enough moti
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python recon/export_ffs_trt.py -o output/ffs --width 864   # the 848x480 engine live.py looks for (~5 min)
+python recon/export_ffs_trt.py   # -> output/ffs/ffs_480x864_it8_fp32_tf32.engine (~5 min)
 ```
 
 TensorRT is pip-installed into the env, leaving a system TensorRT alone. An engine is tied to its input size and TensorRT version.
@@ -86,7 +86,7 @@ pip install --no-build-isolation ~/FastGS/submodules/simple-knn ~/FastGS/submodu
     ~/FastGS/submodules/diff-gaussian-rasterization_fastgs
 ```
 
-`FASTGS_ROOT` if it is not in `~/FastGS`. The patch: CUDA 13 build fixes, a tile-list out-of-bounds write in the rasterizer
+The patch: CUDA 13 build fixes, a tile-list out-of-bounds write in the rasterizer
 (`cudaErrorIllegalAddress` mid-training), and an off-center principal point in the projection matrix (the D455 color camera's is
 off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh).
 

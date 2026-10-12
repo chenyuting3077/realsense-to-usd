@@ -1,31 +1,12 @@
-"""Window of recon/live.py (own process, see live_workers.py), laid out like RTAB-Map's:
+"""Window of recon/live.py (own process): the map (nvblox mesh, trajectory, current camera; Follow /
+Free / Camera views), the tracked IR image with its ORB features, the FFS depth over color, status,
+and the session buttons.
 
-  map view (left)      the nvblox mesh in the world (map) frame, the trajectory (red) and the
-                       current camera (green frustum; red while tracking is lost). View modes:
-                       Free (mouse), Follow (behind and above the camera) and Camera (first
-                       person, from the current pose with the IR camera's field of view)
-  camera (right top)   the left IR image ORB-SLAM3 tracks, ~15 Hz, with its ORB features: green
-                       matched to a map point, orange not; the border turns yellow with fewer than
-                       LOW_MATCHES matches or turning faster than FAST_DPS[0], red when turning
-                       faster than FAST_DPS[1] or tracking is lost
-  depth (right)        the newest frame given to the mapper: FFS depth (turbo, near red to far
-                       blue) over the color image, updated with the mesh; no overlay where there is
-                       no depth or it is beyond DEPTH_RANGE
-  status, controls     tracking / depth / map numbers, the trajectory corrections (loop closure,
-                       map merge, new map, re-level), layer toggles and the session buttons:
-                         Stop               end the session and save it (= Ctrl+C in the terminal)
-                         Discard & restart  throw the session away (its output dir deleted, after
-                                            a confirmation) and start a new one right away
-                         New recording      after a session ended: start the next one
-                         Re-level (IMU)     with the D455 held still: level the world again from
-                                            the accelerometer (the map is rebuilt in the new world)
-
-map_q (from the mapper): ("session", out dir) when a session starts, ("reset",) before the next
-one, ("map", vertices, triangles, colors uint8, camera centers, status dict, (color, depth) or
-None). cam_q: ("cam", left IR image, keypoints Nx3 (x, y, matched), left-IR camera-to-world or
-None, track ms, ORB-SLAM3 tracking ok or "imu" (carried on the IMU alone, not mapped), turning speed
-deg/s) from the tracker; ok without a pose: tracking in a map
-ORB-SLAM3 started after losing track, not used until merged into the main one. ui_q (to the mapper): "stop", "discard", "new", "level".
+map_q: ("session", out dir), ("reset",), ("map", vertices, triangles, colors, camera centers,
+status, (color, depth) or None), ("estimate", seconds) and ("progress", 0..1, text, finished)
+of the USD export.
+cam_q: ("cam", IR image, keypoints Nx3 (x, y, matched), pose or None, track ms, tracking ok or
+"imu" (on the IMU alone), turning deg/s). ui_q (to live.py): "stop", "discard", "new", "usd".
 """
 import signal
 import threading
@@ -33,10 +14,9 @@ import threading
 import numpy as np
 
 LOW_MATCHES = 50
-FAST_DPS = (20, 40)  # turning speed (deg/s): warn, too fast (blur, tracking lost)
-DEPTH_RANGE = (0.2, 2.5)  # as the mapper (--depth-max): farther is left uncolored
-STATUS_LINES = 10
-# The session's steps (live.py's status "stage"), shown in a row with the current one highlighted.
+FAST_DPS = (20, 40)  # turning speed (deg/s): warn, too fast
+DEPTH_RANGE = (0.2, 2.5)  # as the live map
+STATUS_LINES = 9
 STAGES = [("start", "Start"), ("record", "Record"), ("trajectory", "Final trajectory"),
           ("mesh", "Final mesh"), ("save", "Save"), ("done", "Done")]
 
@@ -81,35 +61,37 @@ def frustum(T, st, depth=0.4):
     corners = np.array([[(u - cx) / fx * depth, (v - cy) / fy * depth, depth] for u, v in
                         ((0, 0), (w, 0), (w, h), (0, h))])
     pts = np.vstack([np.zeros(3), corners]) @ T[:3, :3].T + T[:3, 3]
-    lines = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 3], [3, 4], [4, 1]]
-    return pts, lines
+    return pts, [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 3], [3, 4], [4, 1]]
 
 
-def status_text(s, cam):
+GREEN, YELLOW, RED, GREY = (0.35, 0.85, 0.45), (1.0, 0.8, 0.25), (1.0, 0.35, 0.3), (0.6, 0.6, 0.62)
+
+
+def status_lines(s, cam):
+    """(text, color) lines: tracking, depth, map; then corrections and notes in grey."""
     if s is None:
-        return "starting: camera, ORB-SLAM3, FFS ..."
-    lines = [f"{s['t']:.0f} s" + ("  - stopping, final map ..." if s["stopping"] else ""),
-             f"tracking  {s['tracked']} IR pairs, {s['skipped']} skipped, lag {s['lag_ms']:.0f} ms"]
-    if cam is not None:
-        st_ = "OK" if cam["ok"] else "on the IMU alone (not mapped)" if cam.get("imu_only") else \
-            "in another map (not used until merged)" if cam["other_map"] else "LOST"
-        lines.append(f"          {st_}, {cam['matched']}/{cam['features']} features matched")
-    lines += [f"depth     {s['depth']} frames ({s['depth_hz']:.1f} Hz), FFS {s['ffs_ms']:.0f} ms",
-              f"map       v{s['map_version']}, {s['stored']} frames, {s['triangles']} triangles, "
-              f"capture -> map {s['latency_ms']:.0f} ms"]
-    if s["rebuild"]:
-        lines.append(f"          rebuilding with {s['rebuild']}")
-    lines.append("trajectory corrections:" if s["events"] else "trajectory corrections: none yet")
-    lines += [f"  {t:6.1f} s  v{v} {kind}" for kind, t, v in s["events"][-6:]]
-    lines += [f"note: {n}" for n in s.get("notes", [])]
+        return [("Starting camera, ORB-SLAM3 and FFS ...", GREY)]
+    if cam is None or cam["ok"]:
+        track = ("TRACKING", GREEN if cam is None or cam["matched"] >= LOW_MATCHES else YELLOW)
+    else:
+        track = ("ON THE IMU ONLY", YELLOW) if cam.get("imu_only") else ("OTHER MAP", YELLOW) if cam["other_map"] \
+            else ("LOST: go back to a place seen before", RED)
+    feats = f", {cam['matched']}/{cam['features']} features matched" if cam else ""
+    lines = [(f"{track[0]}  {s['tracked']} frames{feats}", track[1]),
+             (f"DEPTH  {s['depth_hz']:.1f} Hz, FFS {s['ffs_ms']:.0f} ms", GREEN if s["depth"] else GREY),
+             (f"MAP  {s['triangles']:,} triangles, {s['stored']} frames, {s['latency_ms']:.0f} ms behind"
+              + (f", rebuilding {s['rebuild']}" if s["rebuild"] else ""), GREEN if s["triangles"] else GREY)]
+    if s["stopping"] and not s.get("done"):
+        lines.append(("Stopping: final trajectory and mesh ...", YELLOW))
+    lines += [(f"{t:6.1f} s  {kind}", GREY) for kind, t, v in s["events"][-4:]]
+    lines += [(n, YELLOW) for n in s.get("notes", [])]
     if s.get("done"):
-        lines += ["", f"saved: {s['done']}", "New recording for another session, or close the window to exit"]
-    return "\n".join(lines)
+        lines.append((s["done"], GREEN if s["done"].startswith("Saved") else YELLOW))
+    return lines
 
 
-def view_process(map_q, cam_q, ui_q, st, z_up, camera):
-    """st: the IR camera (meta["stereo"]); z_up: leveled world (else the first camera's frame, y down);
-    camera: live from the D455 (re-level needs its accelerometer)."""
+def view_process(map_q, cam_q, ui_q, st, z_up):
+    """st: the IR camera (meta["stereo"]); z_up: leveled world (else the first camera's frame, y down)."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     import open3d as o3d
     import open3d.visualization.gui as gui
@@ -117,13 +99,14 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
 
     app = gui.Application.instance
     app.initialize()
-    win = app.create_window("live reconstruction", 1800, 1000)
+    win = app.create_window("realsense-to-usd", 1800, 1000)
     em = win.theme.font_size
     up = np.array([0.0, 0, 1]) if z_up else np.array([0.0, -1, 0])
+    color = lambda c: gui.Color(*c)  # noqa: E731
 
     scene = gui.SceneWidget()
     scene.scene = rendering.Open3DScene(win.renderer)
-    scene.scene.set_background([0.12, 0.12, 0.14, 1])
+    scene.scene.set_background([0.1, 0.1, 0.12, 1])
     scene.scene.show_axes(True)
     if z_up:
         scene.scene.show_ground_plane(True, rendering.Scene.GroundPlane.XY)
@@ -133,36 +116,7 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
     line_mat.shader = "unlitLine"
     line_mat.line_width = 2 * win.scaling
 
-    cam_img = gui.ImageWidget(o3d.geometry.Image(np.zeros((st["height"], st["width"], 3), np.uint8)))
-    depth_img = gui.ImageWidget(o3d.geometry.Image(np.zeros((st["height"] // 2, st["width"] // 2, 3), np.uint8)))
-    cam_label, depth_label = gui.Label("Camera: left IR, ORB features"), gui.Label("Depth: FFS over color")
-    status = gui.Label(status_text(None, None))
-    controls = gui.Vert(0.4 * em)
-    mode = gui.Combobox()
-    for m in ("Free", "Follow", "Camera"):
-        mode.add_item(m)
-    row = gui.Horiz(0.5 * em)
-    row.add_child(gui.Label("Map view"))
-    row.add_child(mode)
-    controls.add_child(row)
-    toggles = gui.Horiz(0.5 * em)
-    show = {}
-    for name in ("mesh", "trajectory", "camera"):
-        cb = gui.Checkbox(name.capitalize())
-        cb.checked = show[name] = True
-        cb.set_on_checked(lambda on, n=name: (show.__setitem__(n, on), scene.scene.show_geometry(n, on)
-                                               if scene.scene.has_geometry(n) else None))
-        toggles.add_child(cb)
-    controls.add_child(toggles)
-    buttons, session = gui.Horiz(0.5 * em), gui.Horiz(0.5 * em)
-    reset, relevel = gui.Button("Reset view"), gui.Button("Re-level (IMU)")
-    stop, discard, new = gui.Button("Stop"), gui.Button("Discard & restart"), gui.Button("New recording")
-    for b in (reset, relevel):
-        buttons.add_child(b)
-    for b in (stop, discard, new):
-        session.add_child(b)
-    controls.add_child(buttons)
-    controls.add_child(session)
+    # header: session and steps
     title = gui.Label("")
     stages = gui.Horiz(0.3 * em)
     stage_labels = {}
@@ -172,34 +126,83 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
         stage_labels[key] = gui.Label(name)
         stages.add_child(stage_labels[key])
 
+    # actions: only the buttons that apply now are shown
+    actions = gui.Horiz(0.5 * em)
+    stop, discard = gui.Button("  Stop  "), gui.Button("Discard & restart")
+    usd, new = gui.Button("  3DGS -> USD  "), gui.Button("New recording")
+    stop.background_color, usd.background_color = color((0.7, 0.2, 0.2)), color((0.2, 0.42, 0.75))
+    eta = gui.Label("")  # the export's estimated time, next to its button
+    eta.text_color = color(GREY)
+    for b in (stop, discard, usd, eta, new):
+        actions.add_child(b)
+    actions.add_stretch()
+    progress, progress_label = gui.ProgressBar(), gui.Label("")
+    progress_label.text_color = color(GREY)
+
+    cam_img = gui.ImageWidget(o3d.geometry.Image(np.zeros((st["height"], st["width"], 3), np.uint8)))
+    depth_img = gui.ImageWidget(o3d.geometry.Image(np.zeros((st["height"] // 2, st["width"] // 2, 3), np.uint8)))
+    cam_label, depth_label = gui.Label("Tracked IR image"), gui.Label("Depth over color (near red, far blue)")
+    for lbl in (cam_label, depth_label):
+        lbl.text_color = color(GREY)
+    status = gui.Vert(0.15 * em)
+    status_rows = []
+    for _ in range(STATUS_LINES):
+        lbl = gui.Label("")
+        status_rows.append(lbl)
+        status.add_child(lbl)
+
+    # map view settings
+    view = gui.Horiz(0.5 * em)
+    mode = gui.Combobox()
+    for m in ("Free", "Follow", "Camera"):
+        mode.add_item(m)
+    mode.selected_index = 1  # Follow: behind the camera
+    reset = gui.Button("Reset")
+    view.add_child(gui.Label("View"))
+    view.add_child(mode)
+    view.add_child(reset)
+    show = {}
+    for name in ("mesh", "trajectory", "camera"):
+        cb = gui.Checkbox(name.capitalize())
+        cb.checked = show[name] = True
+        cb.set_on_checked(lambda on, n=name: (show.__setitem__(n, on), scene.scene.show_geometry(n, on)
+                                               if scene.scene.has_geometry(n) else None))
+        view.add_child(cb)
+
     def set_stage(key):
-        """Steps before the current one dimmed, the current one highlighted, the rest plain."""
         reached = True
         for k, label in stage_labels.items():
             if k == key:
-                label.text_color, reached = gui.Color(1.0, 0.8, 0.2), False
+                label.text_color, reached = color(YELLOW), False
             else:
-                label.text_color = gui.Color(0.45, 0.45, 0.45) if reached else gui.Color(0.85, 0.85, 0.85)
+                label.text_color = color((0.4, 0.4, 0.42)) if reached else color((0.8, 0.8, 0.8))
+
+    def set_status(lines):
+        for i, lbl in enumerate(status_rows):
+            text, c = lines[i] if i < len(lines) else ("", GREY)
+            lbl.text, lbl.text_color = text, color(c)
 
     set_stage("start")
-    for w in (scene, title, stages, cam_label, cam_img, depth_label, depth_img, status, controls):
+    set_status(status_lines(None, None))
+    panel = (title, stages, actions, progress, progress_label, cam_label, cam_img, depth_label, depth_img, status, view)
+    for w in (scene,) + panel:
         win.add_child(w)
 
     def on_layout(ctx):
         r = win.content_rect
-        pw = min(int(r.width * 0.4), 640)
+        pw = min(int(r.width * 0.36), 660)
         scene.frame = gui.Rect(r.x, r.y, r.width - pw, r.height)
-        x, y, m = r.get_right() - pw, r.y, int(0.5 * em)
-        iw, lh = pw - 2 * m, int(1.5 * em)
-        ch = controls.calc_preferred_size(ctx, gui.Widget.Constraints()).height
-        # The two images share what the labels, controls and STATUS_LINES of status leave.
-        ih = int(max(min(iw * st["height"] / st["width"],
-                         (r.height - 4 * lh - ch - STATUS_LINES * 1.3 * em - 7 * m) / 2), 4 * em))
-        for w, h in ((title, lh), (stages, lh), (cam_label, lh), (cam_img, ih), (depth_label, lh), (depth_img, ih),
-                     (controls, ch)):
-            w.frame = gui.Rect(x + m, y, iw, int(h))
-            y += int(h) + m
-        status.frame = gui.Rect(x + m, y, iw, max(r.get_bottom() - y, 0))
+        m, lh = int(0.6 * em), int(1.4 * em)
+        x, y, iw = r.get_right() - pw + m, r.y + m, pw - 2 * m
+        bh = actions.calc_preferred_size(ctx, gui.Widget.Constraints()).height
+        vh = view.calc_preferred_size(ctx, gui.Widget.Constraints()).height
+        sh = status.calc_preferred_size(ctx, gui.Widget.Constraints()).height
+        ih = int(max(min(iw * st["height"] / st["width"], (r.height - 6 * lh - bh - sh - vh - 11 * m) / 2), 4 * em))
+        rows = [(title, lh), (stages, lh), (actions, bh), (progress, int(0.6 * em)), (progress_label, lh),
+                (cam_label, lh), (cam_img, ih), (depth_label, lh), (depth_img, ih), (status, sh), (view, vh)]
+        for w, h in rows:
+            w.frame = gui.Rect(x, y, iw, h)
+            y += h + (m if w not in (cam_label, depth_label, progress) else int(0.2 * em))
     win.set_on_layout(on_layout)
 
     state = {"pose": None, "status": None, "cam": None, "center": np.zeros(3), "shown": False, "out": ""}
@@ -209,8 +212,7 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
         cam.set_projection(60, max(scene.frame.width, 1) / max(scene.frame.height, 1), 0.05, 200,
                            rendering.Camera.FovType.Vertical)
         c = state["center"]
-        eye = c + (np.array([-4.0, 0, 3]) if z_up else np.array([0, -3.0, -4]))
-        cam.look_at(c, eye, up)
+        cam.look_at(c, c + (np.array([-4.0, 0, 3]) if z_up else np.array([0, -3.0, -4])), up)
 
     def place_camera():
         T = state["pose"]
@@ -223,7 +225,7 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
             cam.set_projection(fov, max(scene.frame.width, 1) / max(scene.frame.height, 1), 0.05, 200,
                                rendering.Camera.FovType.Vertical)
             cam.look_at(p + fwd, p, -T[:3, 1])
-        else:
+        else:  # Follow: 2.5 m behind, 1.5 m above
             back = fwd - (fwd @ up) * up
             back /= max(np.linalg.norm(back), 1e-6)
             cam.look_at(p + 0.5 * back, p - 2.5 * back + 1.5 * up, up)
@@ -231,20 +233,20 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
     def on_mode(text, i):
         if text == "Free":
             free_view()
-        scene.scene.show_axes(text != "Camera")  # world axes and ground would cut through the first-person view
+        scene.scene.show_axes(text != "Camera")
         if z_up:
             scene.scene.show_ground_plane(text != "Camera", rendering.Scene.GroundPlane.XY)
-        scene.scene.show_geometry("camera", show["camera"] and text != "Camera") \
-            if scene.scene.has_geometry("camera") else None
+        if scene.scene.has_geometry("camera"):
+            scene.scene.show_geometry("camera", show["camera"] and text != "Camera")
         place_camera()
     mode.set_on_selection_changed(on_mode)
     reset.set_on_clicked(free_view)
 
     def running(on):
-        """Buttons of a running session (on) or of an ended one."""
-        stop.enabled = discard.enabled = on
-        relevel.enabled = on and camera
-        new.enabled = not on
+        stop.visible = discard.visible = on
+        usd.visible = new.visible = eta.visible = not on
+        stop.enabled = discard.enabled = usd.enabled = new.enabled = True
+        win.set_needs_layout()
 
     def send(cmd, *disable):
         ui_q.put(cmd)
@@ -254,10 +256,10 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
     def confirm_discard():
         dlg = gui.Dialog("Discard")
         box = gui.Vert(em, gui.Margins(em, em, em, em))
-        box.add_child(gui.Label(f"Delete this session ({state['out']}) and start a new one?"))
+        box.add_child(gui.Label(f"Delete {state['out']} and start a new recording?"))
         row = gui.Horiz(em)
         yes, no = gui.Button("Discard & restart"), gui.Button("Cancel")
-        yes.set_on_clicked(lambda: (win.close_dialog(), send("discard", stop, discard, relevel)))
+        yes.set_on_clicked(lambda: (win.close_dialog(), send("discard", stop, discard)))
         no.set_on_clicked(win.close_dialog)
         row.add_child(yes)
         row.add_child(no)
@@ -265,11 +267,28 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
         dlg.add_child(box)
         win.show_dialog(dlg)
 
-    stop.set_on_clicked(lambda: send("stop", stop, discard, relevel))
+    def set_estimate(sec):
+        """None: nothing to export."""
+        usd.visible = sec is not None
+        eta.text = "" if sec is None else f"~{max(sec / 60, 1):.0f} min"
+        win.set_needs_layout()
+
+    def set_progress(frac, text, finished):
+        progress.visible = bool(text)  # its slot stays: no layout shift
+        progress.value = frac
+        progress_label.text = text if finished else f"3DGS -> USD {frac * 100:.0f}%: {text}"
+        progress_label.text_color = color(GREEN if finished and frac >= 1 else RED if finished else GREY)
+        if finished:
+            new.enabled = True
+            if text:
+                usd.enabled = frac < 1  # a failed export can be retried
+
+    stop.set_on_clicked(lambda: send("stop", stop, discard))
     discard.set_on_clicked(confirm_discard)
-    new.set_on_clicked(lambda: send("new", new))
-    relevel.set_on_clicked(lambda: send("level"))
+    new.set_on_clicked(lambda: send("new", new, usd))
+    usd.set_on_clicked(lambda: (send("usd", new, usd), set_progress(0.0, "starting", False)))
     running(False)
+    set_progress(0.0, "", True)
 
     def replace(name, geom, mat):
         if scene.scene.has_geometry(name):
@@ -277,24 +296,18 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
         scene.scene.add_geometry(name, geom, mat)
         scene.scene.show_geometry(name, show[name] and not (name == "camera" and mode.selected_text == "Camera"))
 
-    def newest(q):
-        """Blocks for an item, then skips to the newest one queued; None (the end) is kept."""
-        item = q.get()
-        while item is not None and not q.empty():
-            item = q.get()
-        return item
-
     def clear(out=None):
         for name in ("mesh", "trajectory", "camera"):
             if scene.scene.has_geometry(name):
                 scene.scene.remove_geometry(name)
         state.update(pose=None, status=None, cam=None, shown=False)
         set_stage("start")
+        set_progress(0.0, "", True)
         if out is not None:
             state["out"] = out
-            title.text = f"session: {out}"
+            title.text = out
             running(True)
-        status.text = status_text(None, None)
+        set_status(status_lines(None, None))
 
     def run_on_main(fn):
         done = threading.Event()
@@ -303,7 +316,7 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
 
     def map_reader():
         while True:
-            # Session messages are applied in order; of the meshes only the newest after them.
+            # Session and progress messages in order; of the meshes only the newest after them.
             items = [map_q.get()]
             while not map_q.empty():
                 items.append(map_q.get())
@@ -315,6 +328,10 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
                     run_on_main(lambda o=it[1]: clear(o))
                 elif it[0] == "reset":
                     run_on_main(clear)
+                elif it[0] == "progress":
+                    run_on_main(lambda a=it[1:]: set_progress(*a))
+                elif it[0] == "estimate":
+                    run_on_main(lambda sec=it[1]: set_estimate(sec))
             maps = [it for it in items[last + 1:] if it[0] == "map"]
             if not maps:
                 continue
@@ -334,23 +351,25 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
                     replace("mesh", mesh, mesh_mat)
                     if not state["shown"]:
                         state["center"] = v.mean(0)
-                        free_view()
+                        free_view()  # also sets the projection that Follow keeps
+                        place_camera()
                         state["shown"] = True
                 if path is not None:
                     replace("trajectory", path, line_mat)
                 if img is not None:
                     depth_img.update_image(img)
                 state["status"] = s
-                status.text = status_text(s, state["cam"])
+                set_status(status_lines(s, state["cam"]))
                 set_stage(s.get("stage", "record"))
                 if s.get("done"):
                     running(False)
-                win.set_needs_layout()
             run_on_main(apply)
 
     def cam_reader():
         while True:
-            item = newest(cam_q)
+            item = cam_q.get()
+            while item is not None and not cam_q.empty():  # skip to the newest
+                item = cam_q.get()
             if item is None:
                 return
             _, img, kps, T, track_ms, tracking, dps = item
@@ -358,28 +377,23 @@ def view_process(map_q, cam_q, ui_q, st, z_up, camera):
             other_map = bool(tracking) and T is None and not imu_only
             rgb, matched = draw_camera(img, kps, bool(tracking), track_ms, other_map, dps, imu_only)
             image = o3d.geometry.Image(rgb)
-            fr = None
-            if T is not None:
-                pts, lines = frustum(T, st)
-                fr = o3d.geometry.LineSet(o3d.utility.Vector3dVector(pts), o3d.utility.Vector2iVector(lines))
             col = [0.1, 1, 0.2] if T is not None else [1, 0.55, 0] if imu_only else [1, 0.85, 0] if other_map else [1, 0.1, 0.1]
 
             def apply():
                 cam_img.update_image(image)
                 state["cam"] = {"ok": T is not None, "matched": matched, "features": len(kps),
                                 "other_map": other_map, "imu_only": imu_only}
-                if fr is not None:
-                    fr.paint_uniform_color(col)
+                if T is not None:
                     state["pose"] = T
-                    replace("camera", fr, line_mat)
-                    place_camera()
-                elif scene.scene.has_geometry("camera"):  # lost: the last pose in red
-                    pts, lines = frustum(state["pose"], st) if state["pose"] is not None else (None, None)
-                    if pts is not None:
-                        g = o3d.geometry.LineSet(o3d.utility.Vector3dVector(pts), o3d.utility.Vector2iVector(lines))
-                        g.paint_uniform_color(col)
-                        replace("camera", g, line_mat)
-                status.text = status_text(state["status"], state["cam"])
+                pose = state["pose"]
+                if pose is not None:  # lost: the last pose in red
+                    pts, lines = frustum(pose, st)
+                    g = o3d.geometry.LineSet(o3d.utility.Vector3dVector(pts), o3d.utility.Vector2iVector(lines))
+                    g.paint_uniform_color(col)
+                    replace("camera", g, line_mat)
+                    if T is not None:
+                        place_camera()
+                set_status(status_lines(state["status"], state["cam"]))
             run_on_main(apply)
 
     threading.Thread(target=map_reader, daemon=True).start()

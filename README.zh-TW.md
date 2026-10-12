@@ -37,9 +37,9 @@ D455 ──► 追蹤 process：投射器關的 IR ──► ORB-SLAM3 雙目（
                                              │
                      地圖：nvblox TSDF 預覽（深度 ≤ 2.5 m）──► 視窗
 Stop ──► 最終軌跡 ──► 存下的所有幀做距離加權 TSDF（深度 ≤ 4 m）──► mesh_live.ply
-     └─► frames/（color + FFS 深度 + 位姿）、rec/（每組 frameset：color、D455 深度、IR、IMU）
+     └─► frames/（color + FFS 深度 + 位姿）、rec/（每組 frameset：color、IR、IMU）
 
-run_offline.sh：frames/ ──► TSDF + 點雲 ──► COLMAP text ──► FastGS ──► scene.usdc
+3DGS -> USD（視窗）或 run_offline.sh：frames/ ──► TSDF + 點雲 ──► COLMAP text ──► FastGS ──► scene.usdc
 ```
 
 ## 安裝
@@ -51,7 +51,7 @@ run_offline.sh：frames/ ──► TSDF + 點雲 ──► COLMAP text ──►
 ```bash
 conda activate realsense-to-usd
 ./run_live.sh -o output/live_room   # 按視窗的 Stop 或 Ctrl+C 結束
-./run_offline.sh output/live_room   # -> output/live_room/scene.usdc
+./run_offline.sh output/live_room   # -> scene.usdc，或按視窗的 3DGS -> USD
 ```
 
 開始時先拿穩相機 1 秒（用 IMU 轉正），再開始移動。D455 要接 USB 3。
