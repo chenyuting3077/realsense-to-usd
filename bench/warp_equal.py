@@ -1,7 +1,7 @@
 """recon/ffs.py's DisparityToColorDepth against another version of it (a copy of the old ffs.py): the
 depth must be identical. Disparities from the FFS engine on every 10th projector-on IR pair.
 
-Usage: python -m docs.profile.warp_equal <old ffs.py> <rec dir>
+Usage: python -m bench.warp_equal <old ffs.py> <rec dir>
 """
 import importlib.util
 import json

@@ -1,4 +1,4 @@
-"""Stage timings for docs/profile: `with span("ffs/trt"):` adds the block's wall time (ms) to times["ffs/trt"].
+"""Stage timings for docs/speed: `with span("ffs/trt"):` adds the block's wall time (ms) to times["ffs/trt"].
 With PROFILE=1 every span is also an NVTX range (seen in nsys). GPU work counts only as far as the block
 waits for it; nsys shows the rest. Each process has its own `times` (the tracker sends its own)."""
 import os

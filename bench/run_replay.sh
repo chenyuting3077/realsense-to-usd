@@ -1,8 +1,8 @@
 #!/bin/bash
 # One profiled replay of a rec/: main.py --no-view with tegrastats every 100 ms beside it.
-# Usage: docs/profile/run_replay.sh <rec dir> <out dir> [nsys]   (nsys: under nsys profile, with NVTX ranges)
+# Usage: bench/run_replay.sh <rec dir> <out dir> [nsys]   (nsys: under nsys profile, with NVTX ranges)
 set -e
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 ENV=$HOME/miniforge3/envs/realsense-to-usd
 export PATH=$ENV/bin:$PATH
 rec=$1 out=$2
@@ -23,4 +23,4 @@ elif [ "$3" = nsys ]; then
 else
     python main.py "$rec" --no-view -o "$out"
 fi
-python -m docs.profile.summarize "$out"
+python -m bench.summarize "$out"

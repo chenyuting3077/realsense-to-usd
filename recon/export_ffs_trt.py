@@ -1,7 +1,7 @@
 """Build the Fast-FoundationStereo TensorRT engine of recon/ffs.py (8 iterations, 864x480 = the 848x480
 IR padded to 32, max disparity 192, FFS's own fp16 autocast), with the ONNX-compatible cost volumes of
 recon/ffs_volume.py (the same values as FFS's scripts/make_single_onnx.py ones, faster). Other sizes,
-max disparities and TF32: recon.ffs.engine_path(), docs/profile.
+max disparities and TF32: recon.ffs.engine_path(), docs/speed.
 
 Usage: python -m recon.export_ffs_trt [--height 384 --width 640] [--max-disp 128] [--precision tf32]   (~5 min)
 """

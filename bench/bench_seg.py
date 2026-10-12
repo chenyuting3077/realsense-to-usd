@@ -1,8 +1,8 @@
-"""Person segmentation before / after TensorRT (docs/tensorrt/README.md): latency of one 848x480 frame and
+"""Person segmentation settings (docs/speed): latency of one 848x480 frame and
 agreement with DeepLabV3-ResNet50 PyTorch fp32 on every color frame of a session. Builds the
 MobileNetV3 comparison engine into output/seg/ the first time (~4 min).
 
-Usage: python -m docs.tensorrt.bench_seg output/live_room/frames
+Usage: python -m bench.bench_seg output/live_room/frames
 """
 import glob
 import os

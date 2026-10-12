@@ -105,7 +105,7 @@ patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中
 sudo jetson_clocks   # GPU 與記憶體鎖最高時脈（否則 GPU 在兩次 FFS 之間降頻）
 # 每次開機後要重跑（或設成 service）
 # CPU 也鎖最高，每次開機自動：JetPack 7.1 的 jetson_clocks 不動 CPU（schedutil，972–2601 MHz），
-# ORB-SLAM3 每幀會是 32 ms 而不是 22 ms（docs/profile）
-sudo cp docs/install/cpu-performance.service /etc/systemd/system/
+# ORB-SLAM3 每幀會是 32 ms 而不是 22 ms（docs/speed）
+sudo cp system/cpu-performance.service /etc/systemd/system/
 sudo systemctl enable --now cpu-performance.service
 ```

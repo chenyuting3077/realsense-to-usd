@@ -2,7 +2,7 @@
 each (median of 50 after 10 warm-up calls, CUDA events). A faster build of the same model has to give
 the same disparity (up to TF32 rounding).
 
-Usage: python -m docs.profile.ffs_equal <engine A> <engine B> <rec dir> [every=8]
+Usage: python -m bench.ffs_equal <engine A> <engine B> <rec dir> [every=8]
 """
 import os
 import sys

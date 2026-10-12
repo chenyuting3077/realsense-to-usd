@@ -1,5 +1,5 @@
 """Two runs of main.py on the same rec/ -> how far apart their outputs are: the accuracy gate of
-docs/profile (a speed-up keeps the outputs within the spread of the baseline's own re-runs).
+docs/speed (a speed-up keeps the outputs within the spread of the baseline's own re-runs).
 
 - trajectory: ATE (cm) of the color-camera poses of the frames in both (frames/meta.json times),
   after a rigid alignment (Umeyama, no scale); tracked frames of each
@@ -7,7 +7,7 @@ docs/profile (a speed-up keeps the outputs within the spread of the baseline's o
   into A's world by the trajectory alignment (the world itself may shift between runs); triangles
 - depth: per pixel |difference| (mm) of frames/depth_ffs at the same timestamps, where both have depth
 
-Usage: python -m docs.profile.compare_outputs <run A> <run B> [<run C> ...]   (every pair against A)
+Usage: python -m bench.compare_outputs <run A> <run B> [<run C> ...]   (every pair against A)
 """
 import json
 import os

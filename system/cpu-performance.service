@@ -1,6 +1,6 @@
 # Every CPU core at its highest clock at boot: JetPack 7.1's jetson_clocks locks the GPU and the
-# memory but leaves the CPUs on schedutil; ORB-SLAM3 then takes 32 instead of 22 ms a frame (docs/profile).
-#   sudo cp docs/install/cpu-performance.service /etc/systemd/system/
+# memory but leaves the CPUs on schedutil; ORB-SLAM3 then takes 32 instead of 22 ms a frame (docs/speed).
+#   sudo cp system/cpu-performance.service /etc/systemd/system/
 #   sudo systemctl enable --now cpu-performance.service
 [Unit]
 Description=CPU governor performance (realsense-to-usd)

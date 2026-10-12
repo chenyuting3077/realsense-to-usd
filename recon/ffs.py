@@ -27,7 +27,7 @@ def engine_path(height=480, width=864, max_disp=192, precision="amp"):
 
 
 # 848x480 IR at full size (padded to 864) with FFS's fp16 autocast: 62 ms, the accuracy of TF32 at 848x480
-# (docs/profile)
+# (docs/speed)
 ENGINE, SCALE = engine_path(), 1.0
 
 

@@ -1,10 +1,10 @@
-"""Faster Fast-FoundationStereo settings vs. the one used before (848x480, max disparity 192), see README.md:
-latency of an 848x480 IR pair; ETH3D two-view accuracy (laser-scan ground truth, non-occluded
-pixels, each pair cut to an 848x480 window, scored at full resolution); on D455 recordings (every
-4th projector-on IR pair, no ground truth) coverage and |depth difference| vs. that setting,
-by its depth.
+"""FFS engines against the first one: latency of an 848x480 IR pair (the model call: downscaling,
+normalization, padding, inference, disparity back to 848x480; mean of 50 after 10 warm-up calls),
+ETH3D two-view (laser-scan ground truth, non-occluded pixels, each pair cut to an 848x480 window and
+scored at full resolution), and on D455 recordings (every 4th projector-on IR pair, no ground truth)
+coverage / median / p90 |depth difference| against the first engine, by its depth.
 
-Usage: python -m docs.ffs_speed.eval_ffs output/live_a/rec output/live_b/rec
+Usage: python -m bench.ffs_accuracy <rec dir>[,<rec dir>] <engine> <engine> ...
 """
 import glob
 import json
@@ -16,12 +16,10 @@ import cv2
 import numpy as np
 import torch
 
-from recon.ffs import FFS, engine_path
+from bench.ffs_equal import scale
+from recon.ffs import FFS
 
 ETH3D = os.path.expanduser("~/datasets/eth3d")
-SETTINGS = [("848x480, max_disp 192 (before)", engine_path(precision="tf32"), 1.0),
-            ("636x360 (0.75x), max_disp 192", engine_path(384, 640, precision="tf32"), 0.75),
-            ("848x480, max_disp 128", engine_path(max_disp=128, precision="tf32"), 1.0)]
 BINS = [0.2, 0.35, 1, 2, 3, 4, 5]
 
 
@@ -70,15 +68,15 @@ def d455_depth(ffs, recs):
 
 
 def main():
-    recs = sys.argv[1:]
+    recs, engines = sys.argv[1].split(","), sys.argv[2:]
     pair = [gray(sorted(glob.glob(os.path.join(recs[0], s, "*.png")))[100]) for s in ("ir1_on", "ir2_on")]
-    print("| | Latency | fps | ETH3D EPE | bad-1 | bad-2 |\n|---|---:|---:|---:|---:|---:|", flush=True)
-    rows, ref = [], None
-    for name, engine, scale in SETTINGS:
-        ffs = FFS(engine, scale)
+    ref = None
+    print("| engine | latency | ETH3D EPE | bad-1 | bad-2 | " + " | ".join(f"{lo}–{hi} m" for lo, hi in zip(BINS, BINS[1:]))
+          + " |\n|---|---:|---:|---:|---:|" + "---:|" * (len(BINS) - 1))
+    for e in engines:
+        ffs = FFS(e, scale(e))
         ms = latency(ffs, pair)
         epe, bad1, bad2 = eth3d(ffs)
-        print(f"| {name} | {ms:.1f} ms | {1000 / ms:.1f} | {epe:.3f} px | {bad1:.2f}% | {bad2:.2f}% |", flush=True)
         z = d455_depth(ffs, recs)
         ref = z if ref is None else ref
         cells = []
@@ -86,12 +84,10 @@ def main():
             m = (ref >= lo) & (ref < hi)
             d = np.abs(z - ref)[m & (z > 0)] * 1000
             cells.append(f"{(z[m] > 0).mean() * 100:.0f}% / {np.median(d):.0f} / {np.percentile(d, 90):.0f} mm")
-        rows.append(f"| {name} | " + " | ".join(cells) + " |")
+        print(f"| {os.path.basename(e)} | {ms:.1f} ms | {epe:.4f} px | {bad1:.3f}% | {bad2:.3f}% | " + " | ".join(cells) + " |",
+              flush=True)
         del ffs
         torch.cuda.empty_cache()
-    print(f"\nD455 ({len(recs)} recordings): coverage / median / p90 |depth difference| vs. 848x480, max_disp 192, "
-          "by its depth\n\n| | " + " | ".join(f"{lo}–{hi} m" for lo, hi in zip(BINS, BINS[1:])) + " |\n|---|"
-          + "---:|" * (len(BINS) - 1) + "\n" + "\n".join(rows[1:]))
 
 
 if __name__ == "__main__":

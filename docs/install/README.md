@@ -106,7 +106,7 @@ off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh), an
 sudo jetson_clocks   # GPU and memory clocks at max (otherwise the GPU idles down between FFS calls)
 # again after every reboot (or enabled as a service)
 # The CPUs at max too, at every boot: JetPack 7.1's jetson_clocks leaves them to schedutil (972-2601 MHz),
-# ORB-SLAM3 then takes 32 instead of 22 ms a frame (docs/profile)
-sudo cp docs/install/cpu-performance.service /etc/systemd/system/
+# ORB-SLAM3 then takes 32 instead of 22 ms a frame (docs/speed)
+sudo cp system/cpu-performance.service /etc/systemd/system/
 sudo systemctl enable --now cpu-performance.service
 ```
