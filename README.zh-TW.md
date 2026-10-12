@@ -58,6 +58,4 @@ conda activate realsense-to-usd
 
 ## 授權
 
-本 repo 為 GPL-3.0（即時追蹤透過 binding 連結 GPL-3.0 的 ORB-SLAM3）。第三方元件各有授權：
-ORB-SLAM3 GPL-3.0；nvblox Apache-2.0；Fast-FoundationStereo 程式碼為 NVIDIA 自己的授權（見其 LICENSE.txt），C-FFS 權重為
-NVIDIA Open Model Agreement；FastGS 為 MIT，但其中沿用的 Inria 3DGS 程式碼只能做非商業研究。
+GPL-3.0。因為流程中含 Inria 3DGS 與 NVIDIA Fast-FoundationStereo，**僅限非商業研究使用**。

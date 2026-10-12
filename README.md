@@ -58,6 +58,4 @@ Hold the camera still for a second at the start (leveling with the IMU), then mo
 
 ## Licenses
 
-This repository is GPL-3.0 (the live tracker links ORB-SLAM3, which is GPL-3.0). Third-party components keep their own terms:
-ORB-SLAM3 GPL-3.0; nvblox Apache-2.0; Fast-FoundationStereo code under NVIDIA's own source license (see its LICENSE.txt), the C-FFS
-weights under the NVIDIA Open Model Agreement; FastGS MIT, but its Inria 3DGS code is for non-commercial research only.
+GPL-3.0. Since the pipeline includes Inria 3DGS and NVIDIA Fast-FoundationStereo, it is for **non-commercial research only**.
