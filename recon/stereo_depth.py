@@ -13,7 +13,7 @@ wins). Pixels whose match would fall left of the right image are dropped.
 Output: <frames>/<out-dir>/000000.png (uint16, same units as depth/). Use it with
 --depth-dir in reconstruct.py / reconstruct_nvblox.py.
 
-Usage (after `source env.sh`; needs ~/Fast-FoundationStereo and its weights, see README):
+Usage (after `source env.sh`; needs ~/Fast-FoundationStereo and its weights, see docs/INSTALL.md):
   python recon/stereo_depth.py output/room/rec                                    # PyTorch
   python recon/stereo_depth.py output/room/rec --engine output/ffs/<name>.engine  # TensorRT (recon/export_ffs_trt.py)
   python recon/reconstruct.py output/room/rec -o output/room/recon_30hz --poses output/room/rec/poses.npy --depth-dir depth_ffs

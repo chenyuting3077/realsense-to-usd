@@ -9,7 +9,7 @@
 # Output: <out>/point_cloud/iteration_<N>/point_cloud.ply (standard 3DGS PLY; <out>/point_cloud.ply
 #         links to it), <out>/test/ours_<N>/{renders,gt}/, <out>/results.json (PSNR / SSIM / LPIPS)
 #
-# Usage (after `source env.sh`; needs ~/FastGS with patches/fastgs-thor.patch, see README):
+# Usage (after `source env.sh`; needs ~/FastGS with patches/fastgs-thor.patch, see docs/INSTALL.md):
 #   gs/train_fastgs.sh output/room/colmap output/room/fastgs
 #   ITERS=30000 gs/train_fastgs.sh output/room/colmap output/room/fastgs_30k
 set -euo pipefail

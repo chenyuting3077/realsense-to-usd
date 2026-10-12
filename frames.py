@@ -1,4 +1,4 @@
-"""Read the color/depth frames of a frames dir (frames/ or rec/ of a live session, see README), the depth filters shared by every
+"""Read the color/depth frames of a frames dir (frames/ or rec/ of a live session), the depth filters shared by every
 step that consumes them, and the pose helpers shared by the trackers."""
 import json
 import os

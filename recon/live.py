@@ -43,7 +43,7 @@ current camera, the tracked IR image with its ORB features, depth, status, sessi
 their own processes (recon/live_workers.py):
 in a thread here they would wait for the GIL behind nvblox calls and fall behind.
 
-Usage (after `source env.sh` and `sudo jetson_clocks`; build recon/orbslam3_py first, see README):
+Usage (after `source env.sh` and `sudo jetson_clocks`; build recon/orbslam3_py first, see docs/INSTALL.md):
   python recon/live.py                              # D455 until Ctrl+C -> output/live_<date>_<time>,
                                                     # with a window when there is a display ($DISPLAY)
   python recon/live.py --no-view --duration 120 -o output/live_room

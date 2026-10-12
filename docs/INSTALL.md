@@ -1,10 +1,10 @@
-# 安裝
+# Installation
 
-[English](INSTALL.md)
+[繁體中文](INSTALL.zh-TW.md)
 
-全部在同一個 conda 環境裡跑（預設名稱 `realsense-to-usd`，用別的名稱時設 `RS2USD_ENV`）。
-`source env.sh` 會啟用環境、把 `CUDA_HOME` 指到環境裡 pip 安裝的 CUDA 13 toolkit，並把 repo 根目錄加進 `PYTHONPATH`。
-所有指令都在 repo 根目錄執行。
+Everything runs in one conda env (default name `realsense-to-usd`; set `RS2USD_ENV` to use another).
+`source env.sh` activates it, points `CUDA_HOME` at the CUDA 13 toolkit pip-installed into the env and puts the repo root on `PYTHONPATH`.
+Run all commands from the repo root.
 
 ```bash
 conda create -n realsense-to-usd python=3.12 "numpy>=2" imageio matplotlib pip
@@ -14,15 +14,15 @@ pip install "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-cccl==13.0.*" "nvidia-cuda-c
     "nvidia-nvvm==13.0.*" "nvidia-npp==13.*" ninja open3d==0.20.0 pyrealsense2 opencv-python-headless \
     scipy plyfile pybind11
 C=$CUDA_HOME && ln -sf lib $C/lib64 && ln -sf libcudart.so.13 $C/lib/libcudart.so
-conda install -c conda-forge openusd=26.03   # 匯出 USD（PyPI 的 usd-core 沒有 aarch64 版）
+conda install -c conda-forge openusd=26.03   # USD export (PyPI usd-core has no aarch64 build)
 ```
 
-`nvidia-nvvm` 一定要固定在 13.0，新版產生的 PTX ptxas 不支援（`Unsupported .version`）。
+`nvidia-nvvm` must stay at 13.0: newer versions emit PTX that ptxas does not accept (`Unsupported .version`).
 
 ### nvblox
 
-套用 `patches/nvblox-thor.patch` 後從原始碼編譯（`live.py` 用到 patch 改過的 `add_color_frame`，官方 wheel 不能用）。
-x86_64 上把 `CMAKE_CUDA_ARCHITECTURES` 改成自己的 GPU（例如 `89`），`CMAKE_CUDA_COMPILER` 指到 CUDA 13 的 `nvcc`。
+Built from source with `patches/nvblox-thor.patch` (`live.py` uses the patched `add_color_frame`, so the release wheel does not work).
+On x86_64 set `CMAKE_CUDA_ARCHITECTURES` to your GPU (e.g. `89`) and `CMAKE_CUDA_COMPILER` to your CUDA 13 `nvcc`.
 
 ```bash
 git clone --branch v0.0.10 https://github.com/nvidia-isaac/nvblox.git ~/nvblox
@@ -35,11 +35,11 @@ cmake --build ~/nvblox/build -j12
 (cd ~/nvblox/nvblox_torch && CUDA_VERSION=13.0 pip install --no-build-isolation --editable .)
 ```
 
-`BUILD_RENDERER=0`：renderer 需要 Vulkan SDK，重建用不到。patch 內容：sm_110 的 CUDA 架構轉換、`numpy>=2` / `opencv-python-headless`
-取代原本鎖定的版本、`NVBLOX_FREE_SPACE_VOX`（限制 free space 清除的距離）、`add_color_frame(..., depth_frame)`（用對齊的深度融合顏色）、
-`NVBLOX_STREAM_PRIORITY`（`live.py` 讓融合在 GPU 上排在 FFS 前面）。
+`BUILD_RENDERER=0`: the renderer needs the Vulkan SDK and is not used. The patch: correct CUDA architecture for sm_110, `numpy>=2` / `opencv-python-headless` instead of the pinned versions,
+`NVBLOX_FREE_SPACE_VOX` (limit how far free space is cleared), `add_color_frame(..., depth_frame)` (color fused with the aligned depth),
+`NVBLOX_STREAM_PRIORITY` (`live.py` runs integration ahead of FFS on the GPU).
 
-### ORB-SLAM3 與 Python binding
+### ORB-SLAM3 and the Python binding
 
 ```bash
 git clone -b v0.9.3 https://github.com/stevenlovegrove/Pangolin.git ~/Pangolin
@@ -59,9 +59,10 @@ cmake -S recon/orbslam3_py -B recon/orbslam3_py/build -DPython3_EXECUTABLE=$(whi
 cmake --build recon/orbslam3_py/build -j8   # -> recon/orbslam3_py/orbslam3_py.cpython-312-*.so
 ```
 
-patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rectified 雙目印設定時不再 segfault、`stereo_euroc` 不開視窗、
-給 binding 用的 `GetTracker()` / `GetAtlas()`、雙目 + IMU 遇到沒有預積分的幀時跳過 IMU 預測（原本解參考空指標）、
-「Not enough motion」的地圖重置只用在單眼。ORB-SLAM3 不在 `~/ORB_SLAM3` 時用 `--orb-root` 與 CMake 變數 `ORB_SLAM3_ROOT` 指定。
+The patch: C++17 (Pangolin 0.9), `mnFullBAIdx` as `int`, no segfault printing settings of a rectified stereo rig, no viewer in
+`stereo_euroc`, `GetTracker()` / `GetAtlas()` accessors for the binding, stereo + IMU skips the IMU prediction for a frame without
+preintegration instead of dereferencing a null pointer, and the "not enough motion" map reset only for monocular.
+`--orb-root` (default `~/ORB_SLAM3`) and the CMake variable `ORB_SLAM3_ROOT` point elsewhere if needed.
 
 ### Fast-FoundationStereo + TensorRT
 
@@ -69,10 +70,10 @@ patch 內容：C++17（Pangolin 0.9 需要）、`mnFullBAIdx` 改成 `int`、Rec
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
 pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
-python recon/export_ffs_trt.py -o output/ffs --width 864   # live.py 要的 848x480 引擎（約 5 分鐘）
+python recon/export_ffs_trt.py -o output/ffs --width 864   # the 848x480 engine live.py looks for (~5 min)
 ```
 
-TensorRT 用 pip 裝進環境，不動系統的 TensorRT。引擎綁定輸入大小與 TensorRT 版本。
+TensorRT is pip-installed into the env, leaving a system TensorRT alone. An engine is tied to its input size and TensorRT version.
 
 ### FastGS
 
@@ -84,5 +85,12 @@ pip install --no-build-isolation ~/FastGS/submodules/simple-knn ~/FastGS/submodu
     ~/FastGS/submodules/diff-gaussian-rasterization_fastgs
 ```
 
-不在 `~/FastGS` 時設 `FASTGS_ROOT`。patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中途 `cudaErrorIllegalAddress`）、
-投影矩陣支援偏離中心的主點（D455 color 的主點偏好幾個 px，不修正時高斯和 TSDF mesh 差約 9 mm）。
+`FASTGS_ROOT` if it is not in `~/FastGS`. The patch: CUDA 13 build fixes, a tile-list out-of-bounds write in the rasterizer
+(`cudaErrorIllegalAddress` mid-training), and an off-center principal point in the projection matrix (the D455 color camera's is
+off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh).
+
+### Jetson
+
+```bash
+sudo jetson_clocks   # max clocks (otherwise the GPU idles down between FFS calls); again after every reboot
+```
