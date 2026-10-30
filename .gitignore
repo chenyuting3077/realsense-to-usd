@@ -3,3 +3,4 @@ __pycache__/
 *.py[cod]
 recon/vio_py/build/
 recon/vio_py/*.so
+.vscode/
