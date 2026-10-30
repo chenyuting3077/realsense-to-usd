@@ -290,8 +290,9 @@ def export_usd(out, map_q):
               ("progress", 0.0, "3DGS -> USD failed, see the terminal", True))
 
 
-def main():
-    p = argparse.ArgumentParser()
+def main(p=None, after_session=None):
+    """p: a parser with extra options to add these to; after_session(out): run after each session."""
+    p = p or argparse.ArgumentParser()
     p.add_argument("frames", nargs="?", help="rec/ of a session to replay (default: live from the D455)")
     p.add_argument("-o", "--out", help="output dir (default: output/live_<date>_<time>)")
     p.add_argument("--duration", type=float, help="seconds to record (default: until Stop / Ctrl+C)")
@@ -319,6 +320,8 @@ def main():
             else:
                 out = os.path.join(ROOT, "output", f"live_{time.strftime('%Y%m%d_%H%M%S')}")
             how = run_session(args, out, ui)
+            if after_session is not None:
+                after_session(out)
             viewer = ui["viewer"]
             if viewer is None or not viewer.is_alive():
                 return
@@ -353,7 +356,8 @@ def run_session(args, out, ui):
     os.makedirs(out, exist_ok=True)
     camera = not args.frames
     rec_dir = os.path.join(out, "rec") if camera and args.record else None
-    source = ("camera", args.duration, rec_dir, args.projector) if camera else ("replay", args.frames)
+    model = getattr(args, "camera", None)
+    source = ("camera", args.duration, rec_dir, args.projector, model) if camera else ("replay", args.frames)
     map_q, cam_q, ui_q, viewer = ui["map_q"], ui["cam_q"], ui["ui_q"], ui["viewer"]
     tracker = Tracker(source, cam_q)
     meta = tracker.meta

@@ -123,7 +123,7 @@ def replay_source(frames, meta, w0, off, on, stop):
 
 
 class ImuStream:
-    """The D455's IMU, on the frames' clock. between(t_a, t_b) -> Nx7 (t_ns, accel xyz, gyro xyz) with
+    """The camera's IMU, on the frames' clock. between(t_a, t_b) -> Nx7 (t_ns, accel xyz, gyro xyz) with
     the accelerometer interpolated to the gyroscope's times; up() -> gravity's up in the left-IR frame."""
     GYRO_HZ = 200
 
@@ -215,13 +215,21 @@ class ImuFile:
         return self.rows[np.searchsorted(t, t_a, "right"):np.searchsorted(t, t_b, "right")]
 
 
-def open_camera(projector):
-    """D455 -> (pipeline, meta in the frames-dir layout with "up_ir1", ImuStream, IrExposure).
+def open_camera(projector, model=None):
+    """The connected RealSense whose name ends in model (D455, D435I; None: the first one) -> (pipeline,
+    meta in the frames-dir layout with "up_ir1", ImuStream, IrExposure).
     projector "alternate": dots on every other frameset (depth), the others clean (tracking);
     "off": every frameset clean, tracked at 60 Hz and used for depth too."""
     import pyrealsense2 as rs
     c = CAMERA
     pipe, cfg = rs.pipeline(), rs.config()
+    if model:
+        names = {d.get_info(rs.camera_info.name): d.get_info(rs.camera_info.serial_number)
+                 for d in rs.context().devices}
+        serial = next((v for k, v in names.items() if k.upper().endswith(model.upper())), None)
+        if serial is None:
+            raise RuntimeError(f"no RealSense {model} connected (found: {', '.join(names) or 'none'})")
+        cfg.enable_device(serial)
     for i in (1, 2):
         cfg.enable_stream(rs.stream.infrared, i, c["width"], c["height"], rs.format.y8, c["fps"])
     cfg.enable_stream(rs.stream.color, c["width"], c["height"], rs.format.yuyv, c["fps"])
@@ -315,7 +323,7 @@ class Recorder:
 
 
 def camera_source(pipe, off, on, stop, duration, rec, imu, exposure, alternate):
-    """Framesets from the D455 until stop or duration (s): projector-off IR pairs to `off`
+    """Framesets from the camera until stop or duration (s): projector-off IR pairs to `off`
     (tracking), projector-on framesets to `on` (depth); without alternation each goes to both."""
     import pyrealsense2 as rs
     mode = rs.frame_metadata_value.frame_emitter_mode
@@ -370,8 +378,8 @@ def serve_newest(on, req_q, frames_q):
 
 def track_process(source, ctrl_q, out_q, req_q, frames_q, view_q=None):
     """OpenVINS + RTAB-Map (recon/vio.py) on the frames of `source`, in a process of its own.
-    source: ("replay", frames dir) or ("camera", duration, rec dir or None, projector). Sends ("ready", meta),
-    waits for ("go", w0), then tracks until the source ends or ("stop",): ("pose", t_ns, T, track ms, lag ms,
+    source: ("replay", frames dir) or ("camera", duration, rec dir or None, projector, model or None).
+    Sends ("ready", meta), waits for ("go", w0), then tracks until the source ends or ("stop",): ("pose", t_ns, T, track ms, lag ms,
     skipped) per IR pair, ("traj", version, T list, event) when RTAB-Map's graph moves or the start is filled in,
     ("note", text), ("prof", stage timings), ("done",)."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -380,7 +388,7 @@ def track_process(source, ctrl_q, out_q, req_q, frames_q, view_q=None):
 
     pipe = imu = None
     if source[0] == "camera":
-        pipe, meta, imu, exposure = open_camera(source[3])
+        pipe, meta, imu, exposure = open_camera(source[3], source[4])
     else:
         meta = load_meta(source[1])
         if meta.get("imu") and os.path.exists(os.path.join(source[1], meta["imu"]["file"])):

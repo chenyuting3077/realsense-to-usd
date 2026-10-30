@@ -8,6 +8,7 @@
   視窗顯示地圖、追蹤中的影像、深度與狀態。按 Stop 後用存下的所有幀建距離加權的 TSDF mesh。
 - **離線**（`python -m gs.offline`）：這段錄影的幀（遮掉人：即時或在這裡做）→ TSDF mesh → FastGS 3DGS → `scene.usdc`
   （Z-up、公尺、已水平；高斯負責顯示，減面後的 mesh 當靜態碰撞體）。
+- **掃描器**（`python scanner.py --camera d435i`）：即時流程，可選 RealSense 型號；每段錄影另外輸出 `mesh_solidworks.stl`（30 萬面、mm、Y 朝上）。
 
 ## 測試環境
 
@@ -64,6 +65,7 @@ ORB-SLAM3 和 OpenVINS（+ RTAB-Map）、VINS-Fusion、cuVSLAM 在錄影上的�
 ```bash
 conda activate realsense-to-usd
 python main.py -o output/live_room       # 按視窗的 Stop 或 Ctrl+C 結束
+python scanner.py --camera d435i -o output/part   # + mesh_solidworks.stl
 python -m gs.offline output/live_room  # -> scene.usdc，或按視窗的 3DGS -> USD
 ```
 

@@ -8,6 +8,7 @@ Hand-held Intel RealSense D455 → live 3D reconstruction → 3D Gaussian Splatt
   in a window with the map, the tracked image, depth and status. On Stop, a distance-weighted TSDF mesh is built from every stored frame.
 - **Offline** (`python -m gs.offline`): the session's frames (people masked out, live or here) → TSDF mesh → FastGS 3DGS → `scene.usdc`
   (Z-up, meters, leveled; Gaussians for display, the decimated mesh as a static collider).
+- **Scanner** (`python scanner.py --camera d435i`): Live with a chosen RealSense model; each session also writes `mesh_solidworks.stl` (300k triangles, mm, Y up).
 
 ## Tested environment
 
@@ -64,6 +65,7 @@ ORB-SLAM3 vs OpenVINS (+ RTAB-Map), VINS-Fusion and cuVSLAM on the recordings: [
 ```bash
 conda activate realsense-to-usd
 python main.py -o output/live_room       # Stop in the window or Ctrl+C to end
+python scanner.py --camera d435i -o output/part   # + mesh_solidworks.stl
 python -m gs.offline output/live_room  # -> scene.usdc, or 3DGS -> USD in the window
 ```
 
