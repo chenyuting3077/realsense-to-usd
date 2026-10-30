@@ -14,7 +14,7 @@ pip install torch==2.9.1+cu130 torchvision --index-url https://download.pytorch.
 pip install "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-cccl==13.0.*" "nvidia-cuda-crt==13.0.*" \
     "nvidia-nvvm==13.0.*" "nvidia-npp==13.*" ninja open3d==0.20.0 pyrealsense2 opencv-python-headless \
     scipy plyfile pybind11
-C=$CUDA_HOME && ln -sf lib $C/lib64 && ln -sf libcudart.so.13 $C/lib/libcudart.so
+C=$CUDA_HOME && ln -sf lib $C/lib64 && ln -sf libcudart.so.13 $C/lib/libcudart.so && ln -sf libnvrtc.so.13 $C/lib/libnvrtc.so
 conda install -c conda-forge openusd=26.03   # USD export (PyPI usd-core has no aarch64 build)
 ```
 
@@ -59,7 +59,7 @@ Fast-FoundationStereo and FastGS are expected in `~/`, as cloned here.
 ```bash
 git clone https://github.com/NVlabs/Fast-FoundationStereo.git ~/Fast-FoundationStereo
 python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/c-fast-foundationstereo', local_dir='$HOME/Fast-FoundationStereo/weights/c-ffs')"
-pip install scikit-image omegaconf "tensorrt-cu13==11.3.0.99"
+pip install scikit-image omegaconf onnx "tensorrt-cu13==11.3.0.99"
 python -m recon.export_ffs_trt   # -> output/ffs/ffs_480x864_it8_v3_amp.engine (~5 min)
 ```
 
