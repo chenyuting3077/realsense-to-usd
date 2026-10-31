@@ -27,12 +27,14 @@ CAMERA = {"width": 848, "height": 480, "fps": 60, "ir_exposure_ms": 4, "ir_expos
 class IrExposure:
     """Auto gain at a short IR exposure: every PERIOD frames the mean brightness is moved towards
     the target by the gain; only at full gain does the exposure rise (to max_ms). Changes over 8%
-    are sent from a thread of their own: a control transfer takes up to ~40 ms."""
+    are sent from a thread of their own: a control transfer takes up to ~40 ms.
+    auto=False keeps the first exposure and gain: on the D435i (FW 5.15) a gain change stops the
+    projector alternating, the tracking frames then carry the dots."""
     PERIOD = 15
 
-    def __init__(self, sensor, exposure_ms, max_ms, target):
+    def __init__(self, sensor, exposure_ms, max_ms, target, auto=True):
         import pyrealsense2 as rs
-        self.rs, self.s, self.target = rs, sensor, target
+        self.rs, self.s, self.target, self.auto = rs, sensor, target, auto
         self.exp = self.min_exp = exposure_ms * 1000
         self.max_exp, self.gain, self.n = max_ms * 1000, 64, 0
         self.applied = (self.exp, self.gain)
@@ -64,6 +66,8 @@ class IrExposure:
                 pass  # the next update tries again
 
     def update(self, ir):
+        if not self.auto:
+            return
         self.n += 1
         if self.n % self.PERIOD:
             return
@@ -239,7 +243,8 @@ def open_camera(projector, model=None):
     stereo = dev.first_depth_sensor()
     stereo.set_option(rs.option.emitter_enabled, int(projector == "alternate"))
     # Manual exposure before alternating: afterwards switching auto exposure off is refused.
-    exposure = IrExposure(stereo, c["ir_exposure_ms"], c["ir_exposure_max_ms"], c["ir_brightness"])
+    exposure = IrExposure(stereo, c["ir_exposure_ms"], c["ir_exposure_max_ms"], c["ir_brightness"],
+                          auto=not dev.get_info(rs.camera_info.name).upper().endswith("D435I"))
     try:  # FW 5.17 reports an error although the projector does alternate
         stereo.set_option(rs.option.emitter_on_off, int(projector == "alternate"))
     except RuntimeError:
