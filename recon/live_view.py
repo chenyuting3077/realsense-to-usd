@@ -118,6 +118,8 @@ def view_process(map_q, cam_q, ui_q, st, z_up, model=None, scanner=False):
     model: the camera selected for the next recording (None: the first one connected); scanner: the session
     ends with the final mesh, Export (STL, STEP, PLY) instead of 3DGS -> USD."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    from recon.live_workers import die_with_parent
+    die_with_parent()
     import open3d as o3d
     import open3d.visualization.gui as gui
     import open3d.visualization.rendering as rendering

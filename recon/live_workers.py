@@ -382,6 +382,19 @@ def serve_newest(on, req_q, frames_q):
         if item is None:
             return
 
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent():
+    """In a child process: SIGKILL when the parent dies, also by kill -9 (else the child keeps the camera
+    and its memory)."""
+    import ctypes
+    ppid = os.getppid()
+    ctypes.CDLL(None).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+    if os.getppid() != ppid:
+        os._exit(1)
+
+
 def track_process(source, ctrl_q, out_q, req_q, frames_q, view_q=None):
     """OpenVINS + RTAB-Map (recon/vio.py) on the frames of `source`, in a process of its own.
     source: ("replay", frames dir) or ("camera", duration, rec dir or None, projector, model or None).
@@ -389,6 +402,7 @@ def track_process(source, ctrl_q, out_q, req_q, frames_q, view_q=None):
     skipped) per IR pair, ("traj", version, T list, event) when RTAB-Map's graph moves or the start is filled in,
     ("note", text), ("prof", stage timings), ("done",)."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    die_with_parent()
     from recon.frames import load_meta
     from recon.vio import IMU_AHEAD_NS, Vio
 
