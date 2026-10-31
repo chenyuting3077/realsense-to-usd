@@ -168,9 +168,14 @@ class WeightedTSDF:
         with span("tsdf/blocks"):
             depth_np = depth.cpu().numpy() if t.is_tensor(depth) else depth
             Tcw = np.linalg.inv(T_wc)
-            coords = self.blocks.compute_unique_block_coordinates(
-                o3d.t.geometry.Image(o3c.Tensor(np.ascontiguousarray(depth_np[..., None]))),
-                o3c.Tensor(K, o3c.float64), o3c.Tensor(Tcw), depth_scale, DEPTH_MAX, TRUNC_VOX)
+            try:
+                coords = self.blocks.compute_unique_block_coordinates(
+                    o3d.t.geometry.Image(o3c.Tensor(np.ascontiguousarray(depth_np[..., None]))),
+                    o3c.Tensor(K, o3c.float64), o3c.Tensor(Tcw), depth_scale, DEPTH_MAX, TRUNC_VOX)
+            except RuntimeError as e:
+                if "No block is touched" not in str(e):
+                    raise
+                return
         if coords.shape[0] == 0:
             return
         assert self.hashmap.size() + coords.shape[0] <= self.capacity, "TSDF block capacity exceeded"

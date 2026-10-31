@@ -45,6 +45,7 @@ from recon.live_view import desktop_display, view_process
 from recon.live_workers import track_process
 from recon.person_mask import ENGINE as SEG_ENGINE, PersonSeg
 from recon.prof import span, summary, times as prof_times
+from recon import reconstruct
 from recon.reconstruct import WeightedTSDF
 
 VOXEL = 0.01
@@ -302,6 +303,11 @@ def main(p=None):
     p.add_argument("--no-record", dest="record", action="store_false", help="do not save rec/")
     p.add_argument("--no-view", dest="view", action="store_false", help="no window")
     args = p.parse_args()
+    global VOXEL, DEPTH_MAX, FLOOR_DEPTH_MAX
+    VOXEL = getattr(args, "preview_voxel", VOXEL)
+    reconstruct.VOXEL = getattr(args, "voxel", reconstruct.VOXEL)
+    if getattr(args, "max_depth", None):
+        DEPTH_MAX = FLOOR_DEPTH_MAX = reconstruct.DEPTH_MAX = args.max_depth
     if args.view and "DISPLAY" not in os.environ:  # started over ssh: the window on the desktop
         os.environ.update(desktop_display())
         if "DISPLAY" not in os.environ:
