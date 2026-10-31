@@ -290,8 +290,8 @@ def export_usd(out, map_q):
               ("progress", 0.0, "3DGS -> USD failed, see the terminal", True))
 
 
-def main(p=None, after_session=None):
-    """p: a parser with extra options to add these to; after_session(out): run after each session."""
+def main(p=None):
+    """p: a parser with extra options (scanner.py's) to add these to."""
     p = p or argparse.ArgumentParser()
     p.add_argument("frames", nargs="?", help="rec/ of a session to replay (default: live from the D455)")
     p.add_argument("-o", "--out", help="output dir (default: output/live_<date>_<time>)")
@@ -320,8 +320,6 @@ def main(p=None, after_session=None):
             else:
                 out = os.path.join(ROOT, "output", f"live_{time.strftime('%Y%m%d_%H%M%S')}")
             how = run_session(args, out, ui)
-            if after_session is not None:
-                after_session(out)
             viewer = ui["viewer"]
             if viewer is None or not viewer.is_alive():
                 return
@@ -337,6 +335,8 @@ def main(p=None, after_session=None):
                         export.start()
                     elif cmd == "new":
                         break
+                    elif cmd and cmd[0] == "camera":
+                        args.camera = cmd[1]
                 else:
                     return
             ui["map_q"].put(("reset",))
@@ -380,7 +380,8 @@ def run_session(args, out, ui):
     depth = Depth(meta, ui["ffs"], ui["seg"], tracker.req_q, tracker.frames_q, frames_q)
     if args.view and viewer is None:
         viewer = ui["viewer"] = mp.get_context("spawn").Process(
-            target=view_process, args=(map_q, cam_q, ui_q, st, bool(meta.get("up_ir1"))))
+            target=view_process,
+            args=(map_q, cam_q, ui_q, st, bool(meta.get("up_ir1")), model, getattr(args, "scanner", False)))
         viewer.start()
     if viewer is not None:
         map_q.put(("session", out))
@@ -444,6 +445,8 @@ def run_session(args, out, ui):
                     stopping = True
             elif cmd == "stop" and not stopping:
                 raise KeyboardInterrupt
+            elif cmd and cmd[0] == "camera":
+                args.camera = cmd[1]
             if discard:  # drain until the tracker and the source are done (the camera free again)
                 try:
                     frames_q.get(timeout=0.02)
@@ -587,7 +590,8 @@ def run_session(args, out, ui):
     tracker.proc.join(30)  # the camera free for the next session
     if viewer is not None and viewer.is_alive():
         show(done=f"Saved {out}/mesh_live.ply", mesh=mesh)
-        map_q.put(("estimate", estimate(os.path.join(out, "frames"))))
+        if not getattr(args, "scanner", False):
+            map_q.put(("estimate", estimate(os.path.join(out, "frames"))))
     return "done"
 
 

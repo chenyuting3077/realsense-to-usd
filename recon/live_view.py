@@ -1,4 +1,4 @@
-"""Window of main.py (own process): the map (nvblox mesh, trajectory, current camera; Follow /
+"""Window of main.py and scanner.py (own process): the map (nvblox mesh, trajectory, current camera; Follow /
 Free / Camera views), the tracked IR image with its ORB features, the FFS depth over color, status,
 and the session buttons.
 
@@ -6,7 +6,8 @@ map_q: ("session", out dir), ("reset",), ("map", vertices, triangles, colors, ca
 status, (color, depth) or None), ("estimate", seconds) and ("progress", 0..1, text, finished)
 of the USD export.
 cam_q: ("cam", IR image, keypoints Nx3 (x, y, matched), pose or None, track ms, tracking ok or
-"imu" (on the IMU alone), turning deg/s). ui_q (to main.py): "stop", "discard", "new", "usd".
+"imu" (on the IMU alone), turning deg/s). ui_q (to main.py): "stop", "discard", "new", "usd",
+("camera", model or None) for the next recording.
 """
 import os
 import signal
@@ -112,12 +113,17 @@ def status_lines(s, cam):
     return lines
 
 
-def view_process(map_q, cam_q, ui_q, st, z_up):
-    """st: the IR camera (meta["stereo"]); z_up: leveled world (else the first camera's frame, y down)."""
+def view_process(map_q, cam_q, ui_q, st, z_up, model=None, scanner=False):
+    """st: the IR camera (meta["stereo"]); z_up: leveled world (else the first camera's frame, y down);
+    model: the camera selected for the next recording (None: the first one connected); scanner: the session
+    ends with the final mesh, Export (STL, STEP, PLY) instead of 3DGS -> USD."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     import open3d as o3d
     import open3d.visualization.gui as gui
     import open3d.visualization.rendering as rendering
+
+    from recon import mesh_export
+    from recon.live_workers import MODELS
 
     app = gui.Application.instance
     app.initialize()
@@ -142,7 +148,7 @@ def view_process(map_q, cam_q, ui_q, st, z_up):
     title = gui.Label("")
     stages = gui.Horiz(0.3 * em)
     stage_labels = {}
-    for i, (key, name) in enumerate(STAGES):
+    for i, (key, name) in enumerate(s for s in STAGES if not (scanner and s[0] == "save")):
         if i:
             stages.add_child(gui.Label(">"))
         stage_labels[key] = gui.Label(name)
@@ -151,11 +157,17 @@ def view_process(map_q, cam_q, ui_q, st, z_up):
     # actions: only the buttons that apply now are shown
     actions = gui.Horiz(0.5 * em)
     stop, discard = gui.Button("  Stop  "), gui.Button("Discard & restart")
-    usd, new = gui.Button("  3DGS -> USD  "), gui.Button("New recording")
-    stop.background_color, usd.background_color = color((0.7, 0.2, 0.2)), color((0.2, 0.42, 0.75))
+    usd, new, export = gui.Button("  3DGS -> USD  "), gui.Button("New recording"), gui.Button("  Export ...  ")
+    stop.background_color = color((0.7, 0.2, 0.2))
+    usd.background_color = export.background_color = color((0.2, 0.42, 0.75))
     eta = gui.Label("")  # the export's estimated time, next to its button
     eta.text_color = color(GREY)
-    for b in (stop, discard, usd, eta, new):
+    camera = gui.Combobox()
+    for m in ("Any camera",) + tuple(m.upper() for m in MODELS):
+        camera.add_item(m)
+    camera.selected_index = MODELS.index(model) + 1 if model in MODELS else 0
+    camera.set_on_selection_changed(lambda text, i: ui_q.put(("camera", MODELS[i - 1] if i else None)))
+    for b in (stop, discard) + ((export,) if scanner else (usd, eta)) + (new, camera):
         actions.add_child(b)
     actions.add_stretch()
     progress, progress_label = gui.ProgressBar(), gui.Label("")
@@ -192,6 +204,7 @@ def view_process(map_q, cam_q, ui_q, st, z_up):
         view.add_child(cb)
 
     def set_stage(key):
+        key = key if key in stage_labels else "mesh"
         reached = True
         for k, label in stage_labels.items():
             if k == key:
@@ -266,8 +279,8 @@ def view_process(map_q, cam_q, ui_q, st, z_up):
 
     def running(on):
         stop.visible = discard.visible = on
-        usd.visible = new.visible = eta.visible = not on
-        stop.enabled = discard.enabled = usd.enabled = new.enabled = True
+        usd.visible = new.visible = eta.visible = camera.visible = export.visible = not on
+        stop.enabled = discard.enabled = usd.enabled = new.enabled = export.enabled = True
         win.set_needs_layout()
 
     def send(cmd, *disable):
@@ -305,7 +318,42 @@ def view_process(map_q, cam_q, ui_q, st, z_up):
             if text:
                 usd.enabled = frac < 1  # a failed export can be retried
 
+    def export_status(text, c):
+        progress_label.text, progress_label.text_color = text, color(c)
+        win.set_needs_layout()
+
+    def export_to(path):
+        win.close_dialog()
+        export.enabled = new.enabled = False
+        export_status(f"Exporting {os.path.basename(path)} ...", GREY)
+
+        def work():
+            try:
+                done, ok = mesh_export.export(os.path.join(state["out"], "mesh_live.ply"), path), True
+            except Exception as e:
+                done, ok = str(e), False
+
+            def finish():
+                export.enabled = new.enabled = True
+                export_status(f"Exported: {done}" if ok else f"Export failed: {done}", GREEN if ok else RED)
+            app.post_to_main_thread(win, finish)
+        threading.Thread(target=work, daemon=True).start()
+
+    def choose_export():
+        if not os.path.exists(os.path.join(state["out"], "mesh_live.ply")):
+            export_status("No final mesh to export yet", YELLOW)
+            return
+        dlg = gui.FileDialog(gui.FileDialog.SAVE, "Export the mesh", win.theme)
+        dlg.add_filter(".stl", f"STL for SolidWorks (mm, Y up, {mesh_export.STL_TRIANGLES:,} triangles)")
+        dlg.add_filter(".step", f"STEP for SolidWorks (mm, Y up, {mesh_export.STEP_TRIANGLES:,} faces)")
+        dlg.add_filter(".ply", "PLY as built (m, Z up, colors)")
+        dlg.set_path(os.path.join(os.path.abspath(state["out"]), os.path.basename(state["out"]) + ".stl"))
+        dlg.set_on_cancel(win.close_dialog)
+        dlg.set_on_done(export_to)
+        win.show_dialog(dlg)
+
     stop.set_on_clicked(lambda: send("stop", stop, discard))
+    export.set_on_clicked(choose_export)
     discard.set_on_clicked(confirm_discard)
     new.set_on_clicked(lambda: send("new", new, usd))
     usd.set_on_clicked(lambda: (send("usd", new, usd), set_progress(0.0, "starting", False)))
@@ -385,6 +433,11 @@ def view_process(map_q, cam_q, ui_q, st, z_up):
                 set_stage(s.get("stage", "record"))
                 if s.get("done"):
                     running(False)
+                    if scanner and len(f):
+                        mode.selected_index = 0
+                        on_mode("Free", 0)
+                        box = mesh.get_axis_aligned_bounding_box()
+                        scene.setup_camera(60, box, box.get_center())
             run_on_main(apply)
 
     def cam_reader():

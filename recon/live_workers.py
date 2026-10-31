@@ -18,6 +18,7 @@ import numpy as np
 
 from recon.prof import span, summary
 
+MODELS = ("d455", "d435i")
 # 848x480 at 60 fps; color exposure, gain and white balance fixed. The IR exposure is short
 # (less blur when turning) with the gain set by IrExposure.
 CAMERA = {"width": 848, "height": 480, "fps": 60, "ir_exposure_ms": 4, "ir_exposure_max_ms": 8,

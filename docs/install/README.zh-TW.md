@@ -16,6 +16,7 @@ pip install "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-cccl==13.0.*" "nvidia-cuda-c
     scipy plyfile pybind11
 C=$CUDA_HOME && ln -sf lib $C/lib64 && ln -sf libcudart.so.13 $C/lib/libcudart.so && ln -sf libnvrtc.so.13 $C/lib/libnvrtc.so
 conda install -c conda-forge openusd=26.03   # 匯出 USD（PyPI 的 usd-core 沒有 aarch64 版）
+conda install -c conda-forge "pythonocc-core=8.0.1.2=novtk*"   # scanner.py 的 STEP 匯出
 ```
 
 `nvidia-nvvm` 一定要固定在 13.0，新版產生的 PTX ptxas 不支援（`Unsupported .version`）。
