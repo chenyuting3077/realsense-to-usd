@@ -90,6 +90,26 @@ The patch: CUDA 13 build fixes, a tile-list out-of-bounds write in the rasterize
 off by several pixels; without it the Gaussians sit ~9 mm off the TSDF mesh), and per-image masks
 (`<dataset>/masks/`, no loss where 0: the people found by `recon/person_mask.py`).
 
+### RealSense IMU on a kernel without `HID_SENSOR_HUB`
+
+The pip `pyrealsense2` reads the IMU through the kernel's HID sensor drivers. On a kernel built without them
+(`zcat /proc/config.gz | grep HID_SENSOR_HUB` says `not set`, e.g. a custom RT kernel), the camera shows no
+Motion Module and OpenVINS cannot start. librealsense with the RSUSB (libusb) backend reads it from user space instead:
+
+```bash
+git clone --depth 1 --branch v2.59.1 https://github.com/IntelRealSense/librealsense.git ~/librealsense
+cmake -S ~/librealsense -B ~/librealsense/build -DCMAKE_BUILD_TYPE=Release -DFORCE_RSUSB_BACKEND=ON \
+    -DBUILD_PYTHON_BINDINGS=ON -DPYTHON_EXECUTABLE=$(which python) -DBUILD_EXAMPLES=OFF -DBUILD_GRAPHICAL_EXAMPLES=OFF \
+    -DBUILD_TOOLS=OFF -DBUILD_UNIT_TESTS=OFF -DCHECK_FOR_UPDATES=OFF -DCMAKE_INSTALL_PREFIX=$HOME/.local/librealsense \
+    -DCMAKE_INSTALL_RPATH=$HOME/.local/librealsense/lib -DPYTHON_INSTALL_DIR=$HOME/.local/librealsense/python
+cmake --build ~/librealsense/build -j12 && cmake --install ~/librealsense/build
+pip uninstall -y pyrealsense2
+ln -sfn ~/.local/librealsense/python $(python -c "import site; print(site.getsitepackages()[0])")/pyrealsense2
+```
+
+Needs `libusb-1.0-0-dev` and librealsense's udev rules (`99-realsense-libusb.rules`). With RSUSB the D435i's
+accelerometer runs at 100 / 200 / 400 Hz (no 250). If the Motion Module stops sending, `hardware_reset()` the camera.
+
 ### Jetson
 
 ```bash

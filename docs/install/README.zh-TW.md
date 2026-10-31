@@ -89,6 +89,26 @@ patch 內容：CUDA 13 編譯、光柵化的 tile 清單越界寫入（訓練中
 投影矩陣支援偏離中心的主點（D455 color 的主點偏好幾個 px，不修正時高斯和 TSDF mesh 差約 9 mm）、
 每張影像的 mask（`<dataset>/masks/`，0 的地方不算 loss：`recon/person_mask.py` 找到的人）。
 
+### kernel 沒有 `HID_SENSOR_HUB` 時的 RealSense IMU
+
+pip 的 `pyrealsense2` 靠 kernel 的 HID sensor 驅動讀 IMU。kernel 沒編進這些驅動時（`zcat /proc/config.gz | grep HID_SENSOR_HUB`
+顯示 `not set`，例如自訂的 RT kernel），相機看不到 Motion Module，OpenVINS 無法啟動。改用 RSUSB（libusb）後端的 librealsense，
+在 userspace 讀 IMU：
+
+```bash
+git clone --depth 1 --branch v2.59.1 https://github.com/IntelRealSense/librealsense.git ~/librealsense
+cmake -S ~/librealsense -B ~/librealsense/build -DCMAKE_BUILD_TYPE=Release -DFORCE_RSUSB_BACKEND=ON \
+    -DBUILD_PYTHON_BINDINGS=ON -DPYTHON_EXECUTABLE=$(which python) -DBUILD_EXAMPLES=OFF -DBUILD_GRAPHICAL_EXAMPLES=OFF \
+    -DBUILD_TOOLS=OFF -DBUILD_UNIT_TESTS=OFF -DCHECK_FOR_UPDATES=OFF -DCMAKE_INSTALL_PREFIX=$HOME/.local/librealsense \
+    -DCMAKE_INSTALL_RPATH=$HOME/.local/librealsense/lib -DPYTHON_INSTALL_DIR=$HOME/.local/librealsense/python
+cmake --build ~/librealsense/build -j12 && cmake --install ~/librealsense/build
+pip uninstall -y pyrealsense2
+ln -sfn ~/.local/librealsense/python $(python -c "import site; print(site.getsitepackages()[0])")/pyrealsense2
+```
+
+需要 `libusb-1.0-0-dev` 和 librealsense 的 udev 規則（`99-realsense-libusb.rules`）。RSUSB 下 D435i 的加速度計是
+100 / 200 / 400 Hz（沒有 250）。Motion Module 不再送資料時，對相機做 `hardware_reset()`。
+
 ### Jetson
 
 ```bash
