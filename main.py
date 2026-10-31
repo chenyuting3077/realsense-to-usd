@@ -320,6 +320,8 @@ def main(p=None):
             else:
                 out = os.path.join(ROOT, "output", f"live_{time.strftime('%Y%m%d_%H%M%S')}")
             how = run_session(args, out, ui)
+            gc.collect()  # the session's maps and frames, not kept while the window waits
+            torch.cuda.empty_cache()
             viewer = ui["viewer"]
             if viewer is None or not viewer.is_alive():
                 return
@@ -340,8 +342,6 @@ def main(p=None):
                 else:
                     return
             ui["map_q"].put(("reset",))
-            gc.collect()  # the last session's maps and frames
-            torch.cuda.empty_cache()
     except KeyboardInterrupt:
         if ui["viewer"] is not None:
             ui["viewer"].terminate()
